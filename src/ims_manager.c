@@ -16,6 +16,7 @@
 #include "pps_monitor.h"
 #include "self_test.h"
 #include "system_state.h"
+#include "volte_settings.h"
 
 /* Set by signal handlers, acted on by the main and monitor threads. */
 volatile sig_atomic_t g_stop_requested = 0;
@@ -220,6 +221,9 @@ int main(int argc, char *argv[])
     provider_enable();
     LOG_VERBOSE("Provider enabled successfully");
 
+    /* Load the dial mode for this carrier and write the settings app's status file. */
+    volte_settings_init();
+
     if (ims_connected_pps() && incoming_ready_pps() && !force_refresh)
     {
         LOG_VERBOSE("IMS and incoming services already connected, starting background monitors");
@@ -237,16 +241,7 @@ int main(int argc, char *argv[])
 
     apply_volte_provisioning();
 
-    char log_file[512];
-    snprintf(log_file, sizeof(log_file), "%s/dca-enable.log", RUN_PATH);
-
-    char *dca_args[] = {
-        "dca",
-        "-s",
-        "-a", "/pps",
-        NULL};
-
-    if (run_cmd_spawn(dca_args, log_file) != 0)
+    if (push_dca_configs() != 0)
     {
         bbe_exit_fail("DCA_FAILED", 1);
     }

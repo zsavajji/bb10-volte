@@ -85,6 +85,17 @@ This is still experimental:
 
 **To turn it off**, delete `force-ims-voice` from `data/` on the device and reboot, because the daemon only reads it at start. Installing the package again restores the file, so delete it again after each install, or remove the file and its line in `pkg/data/perms` before building.
 
+### Companion settings app
+
+The Cascades app that switches the dial format (`tel:`, `sip:@IMSI domain`,
+`sip:@learned domain`), shows the learned operator domain and the last call result, and has
+**Generate debug log** in its top pull-down menu is a separate project:
+
+**`../volte-manager`** (package `com.zsavajji.voltedomain`).
+
+This repository keeps only the root daemon side (`src/volte_settings.c` and the protocol files
+in Documents); build and install the bar from that project. It needs addon 2.36 or newer.
+
 ## 🚀 Installation
 
 ### 1. Download the addon

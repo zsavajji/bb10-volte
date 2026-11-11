@@ -318,3 +318,21 @@ int slay_by_cmdline_graceful(const char *search_str, int timeout_ms)
     free(pids);
     return 0;
 }
+
+int run_cmd_capture(const char *cmd, char *out, size_t max_len)
+{
+    FILE *p;
+    size_t n;
+
+    if (!cmd || !out || max_len == 0)
+        return -1;
+
+    p = popen(cmd, "r");
+    if (!p)
+        return -1;
+
+    n = fread(out, 1, max_len - 1, p);
+    out[n] = '\0';
+    pclose(p);
+    return (int)n;
+}

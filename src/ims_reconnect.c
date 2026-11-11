@@ -103,6 +103,11 @@ static void reset_radio_if_stalled(void)
         sleep(2);
 }
 
+void ims_reconnect_reset_radio_budget(void)
+{
+    g_radio_reset_spent = 0;
+}
+
 int reconnect_ims_with_backoff(void)
 {
     int attempt = 1;

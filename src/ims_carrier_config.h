@@ -22,6 +22,16 @@ extern "C" {
 int ims_get_carrier_id_from(const char *ids_path, const char *mcc, const char *mnc);
 
 /**
+ * Looks up the carrier's home domain in data_dir/home-domains. That file holds one
+ * "<carrier_id> <domain>" per line; blank lines and lines starting with # are ignored.
+ * The domain goes into the ims DCA config as Home_network_domain_name, which then makes
+ * the dial code build sip:<number>@<domain>;user=phone instead of tel:<number>.
+ *
+ * @return 0 and the domain in out (NUL-terminated), or -1 if the carrier has no entry
+ */
+int ims_lookup_home_domain(const char *data_dir, int carrier_id, char *out, size_t max_len);
+
+/**
  * Finds the carrier profile in data_dir. Prefers carrier-<carrier_id>-volte.xml; otherwise
  * falls back to the first carrier-*.xml found (single-profile packages).
  *

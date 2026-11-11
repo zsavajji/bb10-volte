@@ -162,6 +162,39 @@ static void test_ir92_applied(void)
     CHECK(ims_ir92_applied("", expected) == 0);
 }
 
+static void test_home_domain(void)
+{
+    char out[64];
+
+    put("home-domains",
+        "# carrier domains\n"
+        "\n"
+        "235 ims.telekom.de\n"
+        "  149\tims.orange.pl\t# trailing comment is not part of the domain\n"
+        "1234 ims.example.org\n");
+
+    CHECK(ims_lookup_home_domain(g_tmp, 235, out, sizeof(out)) == 0);
+    CHECK(strcmp(out, "ims.telekom.de") == 0);
+
+    /* Leading blanks and tabs are accepted. */
+    CHECK(ims_lookup_home_domain(g_tmp, 149, out, sizeof(out)) == 0);
+    CHECK(strcmp(out, "ims.orange.pl") == 0);
+
+    /* A longer id must not match a shorter prefix (1234 vs 123). */
+    CHECK(ims_lookup_home_domain(g_tmp, 123, out, sizeof(out)) == -1);
+    CHECK(ims_lookup_home_domain(g_tmp, 1234, out, sizeof(out)) == 0);
+    CHECK(strcmp(out, "ims.example.org") == 0);
+
+    /* Unknown carrier, no file, bad arguments. */
+    CHECK(ims_lookup_home_domain(g_tmp, 999, out, sizeof(out)) == -1);
+    rm("home-domains");
+    CHECK(ims_lookup_home_domain(g_tmp, 235, out, sizeof(out)) == -1);
+    CHECK(ims_lookup_home_domain(NULL, 235, out, sizeof(out)) == -1);
+    CHECK(ims_lookup_home_domain(g_tmp, -1, out, sizeof(out)) == -1);
+    CHECK(ims_lookup_home_domain(g_tmp, 235, NULL, sizeof(out)) == -1);
+    CHECK(ims_lookup_home_domain(g_tmp, 235, out, 0) == -1);
+}
+
 int main(void)
 {
     snprintf(g_tmp, sizeof(g_tmp), "/tmp/bb10-volte-test-XXXXXX");
@@ -171,6 +204,7 @@ int main(void)
     test_find_profile();
     test_ir92_config();
     test_ir92_applied();
+    test_home_domain();
 
     rm("carrierIds.xml");
     rmdir(g_tmp);

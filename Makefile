@@ -17,7 +17,8 @@ SRCS_BIN  := ims_manager.c daemon_stats.c system_state.c carrier_apply.c ims_con
              ims_reconnect.c voice_flag.c pps_monitor.c self_test.c ims_patch.c \
              ims_carrier_config.c carrier_lookup.c carrier_profile.c \
              ims_carrier_db.c carrier_rows.c carrier_apns.c carrier_fetch.c \
-             sys_utils.c log_utils.c file_utils.c proc_utils.c berry_monitor.c
+             sys_utils.c log_utils.c file_utils.c proc_utils.c berry_monitor.c \
+             volte_settings.c volte_settings_parse.c zip_writer.c
 SRCS_BIN  := $(addprefix $(SRC_DIR)/, $(SRCS_BIN))
 SRCS_SO   := $(SRC_DIR)/devnp-volte-swcrypto.c
 
@@ -85,6 +86,7 @@ $(TARGET_SO): $(OBJS_SO) | $(PKG_DIR)
 # The second copy is what an update installs while the old daemon is running; start.sh moves it in.
 package: $(TARGET_BIN) $(TARGET_SO)
 	cp $(TARGET_BIN) $(TARGET_BIN).new
+	cp volte-debug.sh pkg/data/volte-debug.sh
 	@echo "[*] Creating archive $(ZIP_NAME)..."
 	@cd pkg && $(ZIP) -r -q ../$(ZIP_NAME) ./*
 	@echo "[+] All done! Package created: $(ZIP_NAME)"
@@ -115,6 +117,8 @@ test:
 	./build/test_ims_patch
 	cc -std=gnu99 -Isrc -Itests/qnx tests/test_sim_carrier.c -o build/test_sim_carrier
 	./build/test_sim_carrier
+	cc -std=gnu99 -Isrc tests/test_volte_settings.c src/volte_settings_parse.c src/zip_writer.c -o build/test_volte_settings
+	./build/test_volte_settings
 	sh tests/test_start.sh
 
 # Clean object files, dependency files, binaries, and archive

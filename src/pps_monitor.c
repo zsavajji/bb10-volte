@@ -7,6 +7,7 @@
 #include "ims_routes.h"
 #include "system_state.h"
 #include "voice_flag.h"
+#include "volte_settings.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -75,6 +76,7 @@ static void *detailed_pps_monitor_thread(void *arg)
         }
 
         add_missing_ims_routes();
+        volte_settings_poll();
         sync_voice_flag(1);
         check_ims_health(&was_ready);
 

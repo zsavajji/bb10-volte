@@ -125,6 +125,52 @@ int ims_get_carrier_id_from(const char *ids_path, const char *mcc, const char *m
     return ctx.matched_carrier_id;
 }
 
+int ims_lookup_home_domain(const char *data_dir, int carrier_id, char *out, size_t max_len)
+{
+    char path[512];
+    char line[256];
+
+    if (!data_dir || !out || max_len == 0 || carrier_id <= 0)
+        return -1;
+
+    snprintf(path, sizeof(path), "%s/home-domains", data_dir);
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return -1;
+
+    while (fgets(line, sizeof(line), f))
+    {
+        char *p = line;
+        size_t len;
+
+        while (*p == ' ' || *p == '\t')
+            p++;
+        if (*p == '#' || *p == '\r' || *p == '\n' || *p == '\0')
+            continue;
+        if (atoi(p) != carrier_id)
+            continue;
+
+        while (*p && *p != ' ' && *p != '\t')
+            p++;
+        while (*p == ' ' || *p == '\t')
+            p++;
+
+        len = strcspn(p, " \t\r\n");
+        if (len == 0 || len + 1 > max_len)
+        {
+            fclose(f);
+            return -1;
+        }
+        p[len] = '\0';
+        snprintf(out, max_len, "%s", p);
+        fclose(f);
+        return 0;
+    }
+
+    fclose(f);
+    return -1;
+}
+
 int ims_resolve_config_path(const char *mcc, const char *mnc, const char *gid1,
                             char *out_path, size_t max_len)
 {

@@ -3,7 +3,9 @@
 #include "sys_utils.h"
 #include "ims_carrier_config.h"
 #include "carrier_lookup.h"
+#include "volte_settings.h"
 #include "system_state.h"
+#include "proc_utils.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -144,11 +146,31 @@ void write_dca_configs(void)
         snprintf(ir92_cfg, sizeof(ir92_cfg), "%s", ir92_default);
     write_file(IR92_PATH, ir92_cfg, 0644);
 
-    /* Dial numbers as tel: URIs, as stock AT&T and Verizon configure. The default
-       sip:<number>@<home domain>;user=phone takes the domain from the IMSI, and EE and
-       Telekom DE, whose identities live in their own domains, answer it with 503 "(1:223)".
-       0 selects tel: in the dial code (ImsApiPhone, getter at 0x8dff0). */
-    const char *dial_cfg = "IntUrlFmt:n:0\nNatUrlFmt:n:0\n";
+    /* The dial form follows the settings app's mode. IntUrlFmt/NatUrlFmt 0 dials
+       tel:<number> (ImsApiPhone, getter at 0x8dff0); 1 dials sip:<number>@<home domain>;
+       user=phone. The home domain is the IMSI one unless sip-learned writes
+       Home_network_domain_name, which the home-domain patch in ims_patch.c lets win.
+       EE and Telekom DE answered the IMSI-domain form with 503 "(1:223)". */
+    const char *mode = volte_settings_mode();
+    const char *domain = volte_settings_domain();
+
+    char dial_cfg[192];
+    if (strcmp(mode, "sip-learned") == 0 && domain[0])
+    {
+        snprintf(dial_cfg, sizeof(dial_cfg),
+                 "Home_network_domain_name::%s\nIntUrlFmt:n:1\nNatUrlFmt:n:1\n", domain);
+        LOG_VERBOSE("DIAL_MODE: sip-learned, domain %s", domain);
+    }
+    else if (strcmp(mode, "sip-imsi") == 0)
+    {
+        snprintf(dial_cfg, sizeof(dial_cfg), "IntUrlFmt:n:1\nNatUrlFmt:n:1\n");
+        LOG_VERBOSE("DIAL_MODE: sip-imsi");
+    }
+    else
+    {
+        snprintf(dial_cfg, sizeof(dial_cfg), "IntUrlFmt:n:0\nNatUrlFmt:n:0\n");
+        LOG_VERBOSE("DIAL_MODE: tel");
+    }
 
     char ims_cfg[2048];
     snprintf(ims_cfg, sizeof(ims_cfg),
@@ -198,4 +220,13 @@ void write_dca_configs(void)
 
     mkdir_p("/var/dca/sources/test/services/carrier_config/radio_qct", 0755);
     write_file("/var/dca/sources/test/services/carrier_config/radio_qct/ims", "@ims\nIMS_platform::common\n", 0644);
+}
+
+/* Writing /var/dca/sources does nothing until dca copies it into /pps, where ims_rrm reads it. */
+int push_dca_configs(void)
+{
+    char log_file[512];
+    snprintf(log_file, sizeof(log_file), "%s/dca-enable.log", RUN_PATH);
+    char *dca_args[] = {"dca", "-s", "-a", "/pps", NULL};
+    return run_cmd_spawn(dca_args, log_file);
 }

@@ -1,0 +1,9 @@
+# Per-carrier IMS home domain, used to build the SIP request URI:
+#   <carrier_id> <domain>
+# When a carrier has an entry here, the daemon writes it as the @ims
+# Home_network_domain_name and the phone dials sip:<number>@<domain>;user=phone.
+# Without an entry it keeps tel:<number>.
+#
+# Telekom DE (262/01, carrier 235): outgoing calls got 503 "(1:223)" while the
+# R-URI carried the IMSI domain, so the operator's own domain is tried.
+235 ims.telekom.de

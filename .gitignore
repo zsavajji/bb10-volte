@@ -58,6 +58,7 @@ dkms.conf
 /pkg/init/ims_manager
 /pkg/init/ims_manager.new
 /volte.zip
+/pkg/data/volte-debug.sh
 /build/
 
 # Local notes, tester logs and release zips

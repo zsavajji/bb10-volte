@@ -10,5 +10,6 @@ void stop_ims(void);
 void start_ims(void);
 void apply_volte_provisioning(void);
 void write_dca_configs(void);
+int push_dca_configs(void);
 
 #endif /* IMS_CONTROL_H */

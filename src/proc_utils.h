@@ -6,6 +6,10 @@
 
 /* Process & system control */
 int run_cmd_spawn(char *const argv[], const char *log_path);
+
+/* Runs cmd through /bin/sh and copies up to max_len-1 bytes of its stdout into out.
+ * Returns the number of bytes read, or -1 on error. */
+int run_cmd_capture(const char *cmd, char *out, size_t max_len);
 int find_pid_by_name(const char *name, int strict);
 int slay_by_cmdline_graceful(const char *search_str, int timeout_ms);
 

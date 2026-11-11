@@ -48,11 +48,6 @@ HOST_CC     ?= cc
 HOST_XML2   ?= $(shell xml2-config --cflags --libs 2>/dev/null || echo -I/usr/include/libxml2 -lxml2)
 TEST_BIN    := tests/test_carrier_config
 
-test:
-	$(HOST_CC) -std=gnu99 -Wall -Wextra -Isrc tests/test_carrier_config.c src/ims_carrier_config.c \
-		$(HOST_XML2) -o $(TEST_BIN)
-	./$(TEST_BIN)
-
 # Helper target to invoke build with DEBUG=1
 debug:
 	@$(MAKE) DEBUG=1
@@ -97,6 +92,10 @@ package: $(TARGET_BIN) $(TARGET_SO)
 # Runs on the build host, not the phone: the carrier code has no QNX dependencies
 test:
 	@mkdir -p build
+	cc -std=gnu99 -Isrc $$(xml2-config --cflags) tests/test_carrier_config.c \
+		src/ims_carrier_config.c src/carrier_lookup.c \
+		$$(xml2-config --libs) -o build/test_carrier_config
+	./build/test_carrier_config
 	cc -std=gnu99 -Isrc $$(xml2-config --cflags) tests/test_carrier.c \
 		src/ims_carrier_config.c src/carrier_lookup.c src/carrier_profile.c \
 		src/ims_carrier_db.c src/carrier_rows.c src/carrier_apns.c src/carrier_fetch.c \

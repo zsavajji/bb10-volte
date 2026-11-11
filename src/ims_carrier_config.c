@@ -2,6 +2,8 @@
 #include "carrier_lookup.h"
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <dirent.h>
 
@@ -95,11 +97,6 @@ static void sax_end_element_cb(void *ctx, const xmlChar *name)
  * Public API Implementation
  * ------------------------------------------------------------------------- */
 
-int ims_get_carrier_id(const char *mcc, const char *mnc)
-{
-    return ims_get_carrier_id_from(CARRIER_IDS_PATH, mcc, mnc);
-}
-
 int ims_get_carrier_id_from(const char *ids_path, const char *mcc, const char *mnc)
 {
     if (!ids_path || !mcc || !mnc || mcc[0] == '\0' || mnc[0] == '\0')
@@ -128,7 +125,8 @@ int ims_get_carrier_id_from(const char *ids_path, const char *mcc, const char *m
     return ctx.matched_carrier_id;
 }
 
-int ims_resolve_config_path(const char *mcc, const char *mnc, char *out_path, size_t max_len)
+int ims_resolve_config_path(const char *mcc, const char *mnc, const char *gid1,
+                            char *out_path, size_t max_len)
 {
     if (!out_path || max_len == 0)
         return -1;

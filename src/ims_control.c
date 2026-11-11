@@ -2,6 +2,7 @@
 #include "ims_patch.h"
 #include "sys_utils.h"
 #include "ims_carrier_config.h"
+#include "carrier_lookup.h"
 #include "system_state.h"
 
 #include <stdio.h>
@@ -130,31 +131,40 @@ void write_dca_configs(void)
 {
     mkdir_p("/var/dca/sources/ims/services/carrier_config/ims", 0755);
 
+    int carrier_id = ims_get_carrier_id(g_mcc, g_mnc, g_gid1);
+
     /* The phone's SDP answer copies these lists. Answering a network offer of
        0,2,4,7 (AMR-WB 0,1,2) with only 7 (AMR-WB 2), the stock values, left
        incoming calls with no audio from the phone, and the network ended them
-       after about 30 seconds. */
-    const char *ir92_cfg = "@ir92\nUsePreconditions:b:true\nSMS_Format::3GPP\namr_modeset_list::0,2,4,7\namrwb_modeset_list::0,1,2\n";
+       after about 30 seconds. A carrier may ship data/ir92-<id> to replace it. */
+    const char *ir92_default = "@ir92\nUsePreconditions:b:true\nSMS_Format::3GPP\namr_modeset_list::0,2,4,7\namrwb_modeset_list::0,1,2\n";
+    char ir92_cfg[512];
+    if (carrier_id <= 0 ||
+        ims_load_ir92_config(g_data_path, carrier_id, ir92_default, ir92_cfg, sizeof(ir92_cfg)) != 0)
+        snprintf(ir92_cfg, sizeof(ir92_cfg), "%s", ir92_default);
     write_file(IR92_PATH, ir92_cfg, 0644);
 
-    const char *ims_cfg = "@ims\n"
-                          "IMS_services:json:[{\"service\":\"voice\",\"feature_tag\":\"urn:urn-7:3gpp-service.ims.icsi.mmtel\",\"network\":[\"LTE\"]}]\n"
-                          "Mobility_Management_IMS_Voice_Termination:n:1\n"
-                          "IMS_profilesV2:json:[\"IR92\"]\n"
-                          "supported_networks:json:[\"LTE\"]\n"
-                          "PCSCF_discoveryV2:json:[\"PCO\"]\n"
-                          "SDK_Config::3GPP\n"
-                          "IMS_always_on:b:true\n"
-                          /* ponytail: HD Voice on for every network; add per-carrier
-                             handling if one rejects AMR-WB. */
-                          "AudioConfig:json:{\"HDvoice\":true}\n"
-                          /* Dial numbers as tel: URIs, as stock AT&T and Verizon configure. The
-                             default sip:<number>@<home domain>;user=phone takes the domain from the
-                             IMSI, and EE and Telekom DE, whose identities live in their own
-                             domains, answer it with 503 "(1:223)". 0 selects tel: in the dial
-                             code (ImsApiPhone, getter at 0x8dff0). */
-                          "IntUrlFmt:n:0\n"
-                          "NatUrlFmt:n:0\n";
+    /* Dial numbers as tel: URIs, as stock AT&T and Verizon configure. The default
+       sip:<number>@<home domain>;user=phone takes the domain from the IMSI, and EE and
+       Telekom DE, whose identities live in their own domains, answer it with 503 "(1:223)".
+       0 selects tel: in the dial code (ImsApiPhone, getter at 0x8dff0). */
+    const char *dial_cfg = "IntUrlFmt:n:0\nNatUrlFmt:n:0\n";
+
+    char ims_cfg[2048];
+    snprintf(ims_cfg, sizeof(ims_cfg),
+             "@ims\n"
+             "IMS_services:json:[{\"service\":\"voice\",\"feature_tag\":\"urn:urn-7:3gpp-service.ims.icsi.mmtel\",\"network\":[\"LTE\"]}]\n"
+             "Mobility_Management_IMS_Voice_Termination:n:1\n"
+             "IMS_profilesV2:json:[\"IR92\"]\n"
+             "supported_networks:json:[\"LTE\"]\n"
+             "PCSCF_discoveryV2:json:[\"PCO\"]\n"
+             "SDK_Config::3GPP\n"
+             "IMS_always_on:b:true\n"
+             /* ponytail: HD Voice on for every network; add per-carrier
+                handling if one rejects AMR-WB. */
+             "AudioConfig:json:{\"HDvoice\":true}\n"
+             "%s",
+             dial_cfg);
 
     /* REGISTER is about 1900 bytes. Some network routes drop it as fragmented UDP, so
        large messages go over TCP. A data/sip-udp file keeps everything on UDP, to test

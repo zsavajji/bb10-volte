@@ -12,17 +12,12 @@
 extern "C" {
 #endif
 
-/**
- * Resolves the path to the imsconfig_<carrier_id>.xml file for the given SIM.
- *
- * @param mcc Mobile Country Code (e.g., "255")
- * @param mnc Mobile Network Code (e.g., "01")
- * @return carrier_id (>0) on success, or -1 if not found or on error
- */
-int ims_get_carrier_id(const char *mcc, const char *mnc);
+/* ims_get_carrier_id(mcc, mnc, gid1) lives in carrier_lookup.h: it also matches the SIM's
+   GID, the way carrier_mgr does. This file keeps only the plain, GID-less lookup. */
 
 /**
- * Same as ims_get_carrier_id(), reading the given carrierIds.xml instead of CARRIER_IDS_PATH.
+ * Same as ims_find_carrier_id(), reading the given carrierIds.xml instead of CARRIER_IDS_PATH.
+ * Ignores GIDs and IMSI/ICCID ranges, so prefer ims_get_carrier_id() when gid1 is known.
  */
 int ims_get_carrier_id_from(const char *ids_path, const char *mcc, const char *mnc);
 

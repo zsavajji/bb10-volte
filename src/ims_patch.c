@@ -13,32 +13,63 @@
 #define IMS_RRM_SIZE 4787852 /* size of ims_rrm on the only rooted build, patched or not */
 #define PATH_BUF (512 + 16)
 
+/* The home-domain site is only wanted when a carrier uses its own learned domain (sip-learned).
+   With this off it is reverted to the stock bytes. */
+int g_ims_patch_home_domain = 0;
+
+enum
+{
+    PATCH_ALWAYS,
+    PATCH_HOME,   /* only with g_ims_patch_home_domain */
+    PATCH_RETIRED /* shipped by 2.34-2.37, now always reverted to stock */
+};
+
 typedef struct
 {
     size_t off;
     unsigned char from[2];
     unsigned char to[2];
+    int use;
 } patch_t;
 
 static const patch_t patches[] = {
     /* SDP parser: an e= line it can't parse aborted the whole answer and hung up the call
        (Telus sends e=imsstirshaken@telus.com, valid per RFC 4566).
        `cbnz r0` becomes `b`, so the line is skipped. */
-    {0x2086ae, {0x68, 0xb9}, {0x0d, 0xe0}},
+    {0x2086ae, {0x68, 0xb9}, {0x0d, 0xe0}, PATCH_ALWAYS},
     /* Remote numbers without a '+' were shown as user@host (Viettel national format).
        `beq` becomes `nop`, so the user part is always used. */
-    {0xd9ffa, {0x08, 0xd0}, {0x00, 0xbf}},
+    {0xd9ffa, {0x08, 0xd0}, {0x00, 0xbf}, PATCH_ALWAYS},
     /* The SDP answer carried our own AMR/AMR-WB mode-set instead of the offered one.
        Telus offers mode-set=7 in an UPDATE and rejects 0,2,4,7 with 406, killing the call.
        ims_rrm can copy the offered mode-set, gated on AMR[WB].CopyRemoteModeSet, but only
        the '3GPP' scheme sets those to 1, and onMobileTechnologyChanged renames an unknown
        scheme ('3GPP' included) to 'Vodafone' first, so the gate always read its default 0.
        `movs r1, #0` becomes `movs r1, #1`: the default for AMR-WB, then AMR. */
-    {0x24c6d8, {0x00, 0x21}, {0x01, 0x21}},
-    {0x24c700, {0x00, 0x21}, {0x01, 0x21}},
+    {0x24c6d8, {0x00, 0x21}, {0x01, 0x21}, PATCH_ALWAYS},
+    {0x24c700, {0x00, 0x21}, {0x01, 0x21}, PATCH_ALWAYS},
+    /* Per-carrier home domain. The setter (0x8d0ea) keeps the domain in the base slot +0x300
+       with its source; while that source is 9 (IMSI/IMPU-derived) or 2 (@ims
+       Home_network_domain_name), it only accepts a new value from source 7 or 9, so the
+       carrier config always lost to the IMSI domain. `sub.w lr, r4, #9` becomes `#2`: the
+       accepted pair is now 7 or 2, so the config replaces the IMSI domain whichever comes
+       first and the IMSI domain can't take it back. The value stays in +0x300 with the stock
+       write, so every reader agrees (the dial getter, the HomeDomain dump, registration). */
+    {0x8d176, {0x09, 0x0e}, {0x02, 0x0e}, PATCH_HOME},
+    /* 2.34-2.37 moved source 2 into the override slot +0x320 as source 7 instead. That left
+       +0x300 empty, which code reading it directly can't handle: CoopVoce logged
+       `HomeDomain[0]:` and looped on `route: INVALID to CELL` with no REGISTER. */
+    {0x8d218, {0x07, 0x2c}, {0x02, 0x2c}, PATCH_RETIRED},
+    {0x8d220, {0x22, 0x46}, {0x07, 0x22}, PATCH_RETIRED},
 };
 
 #define PATCH_COUNT (sizeof(patches) / sizeof(patches[0]))
+
+static int patch_wanted(size_t i)
+{
+    return patches[i].use == PATCH_ALWAYS ||
+           (patches[i].use == PATCH_HOME && g_ims_patch_home_domain);
+}
 
 /* A site may already hold its patched bytes, since other addons copy and stack on our copy.
    Anything else at a site means a different build, and nothing is touched. */
@@ -57,9 +88,14 @@ int ims_patch_buffer(unsigned char *buf, size_t len)
 
     for (i = 0; i < PATCH_COUNT; i++)
     {
-        if (memcmp(buf + patches[i].off, patches[i].from, 2) == 0)
+        int want_to = patch_wanted(i);
+        const unsigned char *target = want_to ? patches[i].to : patches[i].from;
+        const unsigned char *other = want_to ? patches[i].from : patches[i].to;
+
+        if (memcmp(buf + patches[i].off, target, 2) != 0 &&
+            memcmp(buf + patches[i].off, other, 2) == 0)
         {
-            memcpy(buf + patches[i].off, patches[i].to, 2);
+            memcpy(buf + patches[i].off, target, 2);
             changed = 1;
         }
     }

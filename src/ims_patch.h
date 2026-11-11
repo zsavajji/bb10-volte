@@ -3,6 +3,10 @@
 
 #include <stddef.h>
 
+/* The home-domain patch is applied only when this is set; otherwise its site is reverted to
+   the stock bytes. Set from the dial mode: sip-learned = 1. */
+extern int g_ims_patch_home_domain;
+
 /* Applies the byte patches still missing. 1 if it changed bytes, 0 if all are there already,
    -1 and no change if a site holds neither the stock nor the patched bytes. */
 int ims_patch_buffer(unsigned char *buf, size_t len);

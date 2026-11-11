@@ -46,6 +46,8 @@ static void put(unsigned char *buf, size_t i, int to)
 static void check_buffer(void)
 {
     unsigned char *buf = calloc(1, SIZE);
+
+    g_ims_patch_home_domain = 1;
     unsigned char *copy = calloc(1, SIZE);
 
     assert(buf && copy);
@@ -83,7 +85,8 @@ static void check_buffer(void)
         put(buf, i, 0);
     assert(ims_patch_buffer(buf, SIZE) == 1);
     for (size_t i = 0; i < COUNT; i++)
-        assert(memcmp(buf + patches[i].off, patches[i].to, 2) == 0);
+        assert(memcmp(buf + patches[i].off,
+                      patches[i].use == PATCH_RETIRED ? patches[i].from : patches[i].to, 2) == 0);
 
     free(buf);
     free(copy);
@@ -155,7 +158,8 @@ static void check_real_binary(void)
     other = slurp("build/ims_rrm_stacked", &len);
     assert(len == IMS_RRM_SIZE && other[0x1000] == (unsigned char)(stock[0x1000] ^ 0xff));
     for (size_t i = 0; i < COUNT; i++)
-        assert(memcmp(other + patches[i].off, patches[i].to, 2) == 0);
+        assert(memcmp(other + patches[i].off, patch_wanted(i) ? patches[i].to : patches[i].from,
+                      2) == 0);
     free(other);
     free(stock);
     free(patched);
@@ -169,9 +173,42 @@ static void check_real_binary(void)
     assert(access("build/ims_rrm_bad", F_OK) != 0);
 }
 
+static void check_home_toggle(void)
+{
+    unsigned char *buf = calloc(1, SIZE);
+
+    assert(buf);
+    for (size_t i = 0; i < COUNT; i++)
+        put(buf, i, 0);
+
+    /* A copy patched by 2.34-2.37: the retired sites go back to stock even with the mode on. */
+    for (size_t i = 0; i < COUNT; i++)
+        put(buf, i, patches[i].use != PATCH_HOME);
+
+    /* Off: the home-domain site and the retired ones are stock, the four old patches stay. */
+    g_ims_patch_home_domain = 0;
+    assert(ims_patch_buffer(buf, SIZE) == 1);
+    for (size_t i = 0; i < COUNT; i++)
+        assert(memcmp(buf + patches[i].off,
+                      patches[i].use == PATCH_ALWAYS ? patches[i].to : patches[i].from, 2) == 0);
+
+    /* Already in the off state: stable. */
+    assert(ims_patch_buffer(buf, SIZE) == 0);
+
+    g_ims_patch_home_domain = 1;
+    assert(ims_patch_buffer(buf, SIZE) == 1);
+    for (size_t i = 0; i < COUNT; i++)
+        assert(memcmp(buf + patches[i].off,
+                      patches[i].use == PATCH_RETIRED ? patches[i].from : patches[i].to, 2) == 0);
+    assert(memcmp(buf + 0x8d176, "\x02\x0e", 2) == 0);
+
+    free(buf);
+}
+
 int main(void)
 {
     check_buffer();
+    check_home_toggle();
     check_real_binary();
     printf("test_ims_patch: OK\n");
     return 0;

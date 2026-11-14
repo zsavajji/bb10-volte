@@ -76,7 +76,9 @@ void start_ims(void)
     sigaddset(&sigdefault, SIGINT);
 
     posix_spawnattr_setsigdefault(&attr, &sigdefault);
-    posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSID);
+    /* The monitor thread starts most ims_rrm processes, and it blocks the stop signals. */
+    spawnattr_unblock_stop_signals(&attr);
+    posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSID);
 
     char *args[] = {
         "on", "-d", (char *)ims_rrm_binary(),

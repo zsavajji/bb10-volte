@@ -11,9 +11,25 @@
 #include <spawn.h>
 #include <dirent.h>
 #include <limits.h>
+#include <pthread.h>
 #include <sys/wait.h>
 
 /* Process execution and control helpers */
+
+/* A spawned child inherits the calling thread's signal mask, and worker threads block the stop
+   signals (start_worker). ims_rrm started from the monitor thread ran with SIGTERM blocked, so
+   every stop waited out its timeout and ended in SIGKILL. The caller still has to set
+   POSIX_SPAWN_SETSIGMASK in the flags. */
+void spawnattr_unblock_stop_signals(posix_spawnattr_t *attr)
+{
+    sigset_t mask;
+
+    pthread_sigmask(SIG_SETMASK, NULL, &mask);
+    sigdelset(&mask, SIGTERM);
+    sigdelset(&mask, SIGINT);
+    sigdelset(&mask, SIGHUP);
+    posix_spawnattr_setsigmask(attr, &mask);
+}
 
 int run_cmd_spawn(char *const argv[], const char *log_path)
 {
@@ -35,9 +51,15 @@ int run_cmd_spawn(char *const argv[], const char *log_path)
         }
     }
 
-    pid_t pid;
-    int status = posix_spawnp(&pid, argv[0], &actions, NULL, argv, NULL);
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+    spawnattr_unblock_stop_signals(&attr);
+    posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK);
 
+    pid_t pid;
+    int status = posix_spawnp(&pid, argv[0], &actions, &attr, argv, NULL);
+
+    posix_spawnattr_destroy(&attr);
     posix_spawn_file_actions_destroy(&actions);
     if (fd >= 0)
         close(fd);

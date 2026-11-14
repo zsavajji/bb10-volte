@@ -64,6 +64,25 @@ int main(void)
     read_line_signal_safe("build/stop_sender_missing", out, sizeof(out));
     assert(strcmp(out, "unknown") == 0);
 
+    /* A child must get the stop signals even when the spawning thread blocks them, as the
+       daemon's worker threads do: this shell ends by its own SIGTERM, not by reaching exit 0. */
+    sigset_t stop, old_mask;
+    sigemptyset(&stop);
+    sigaddset(&stop, SIGTERM);
+    sigaddset(&stop, SIGINT);
+    sigaddset(&stop, SIGHUP);
+    pthread_sigmask(SIG_BLOCK, &stop, &old_mask);
+
+    char *term_self[] = {"sh", "-c", "kill -TERM $$; exit 0", NULL};
+    char *exit_ok[] = {"sh", "-c", "exit 0", NULL};
+    assert(run_cmd_spawn(term_self, NULL) == -1);
+    assert(run_cmd_spawn(exit_ok, NULL) == 0);
+
+    /* The caller's own mask is left alone. */
+    sigset_t now;
+    pthread_sigmask(SIG_SETMASK, &old_mask, &now);
+    assert(sigismember(&now, SIGTERM) && sigismember(&now, SIGHUP));
+
     puts("stop sender tests passed");
     return 0;
 }

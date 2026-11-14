@@ -10,6 +10,8 @@
 
 void volte_settings_init(void);
 void volte_settings_poll(void);
+/* For loops that block the monitor: VoLTE off and the debug report only, the rest is "busy". */
+void volte_settings_poll_busy(void);
 
 /* The phone status PPS changed: after the next call ends, check how its dial format fared. */
 void volte_settings_phone_changed(void);

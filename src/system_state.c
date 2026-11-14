@@ -4,6 +4,7 @@
 #include "carrier_apply.h"
 #include "ims_control.h"
 #include "pps_monitor.h"
+#include "volte_settings.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -317,6 +318,18 @@ void wait_until_ready(void)
         {
             log_msg("[BBE] NOT_READY: %s", failure);
             logged = failure;
+        }
+        /* Mobile data can stay off for hours. The SIM and carrier are known by now, so the
+           settings app can be answered (main() runs volte_settings_init() again later). */
+        if (strcmp(failure, "DATA_OFF") == 0)
+        {
+            static int settings_ready = 0;
+            if (!settings_ready)
+            {
+                volte_settings_init();
+                settings_ready = 1;
+            }
+            volte_settings_poll_busy();
         }
         exit_if_stopped();
         sleep(3);

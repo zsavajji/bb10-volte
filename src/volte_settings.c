@@ -404,6 +404,8 @@ static void apply_mode(const char *mode, const char *done_message)
        the same-IP/port collision. A user Apply gets a fresh reset budget. */
     ims_reconnect_reset_radio_budget();
     int ok = reconnect_ims_with_backoff();
+    if (!ok && volte_settings_voice_off())
+        return; /* turned off meanwhile; that request wrote the status */
     write_status(ok ? "idle" : "error", ok ? done_message : "IMS did not connect");
 }
 
@@ -501,6 +503,37 @@ static void turn_off(void)
     write_status("idle", "VoLTE is off; calls use 3G or 2G");
 }
 
+/* For the loops that keep the monitor from polling: the boot wait for mobile data and IMS
+   reconnects, which can block for many minutes. Unanswered, the app stays busy and Apply is
+   greyed out (Thomas on 2.42 could not turn VoLTE off). VoLTE off and the debug report run at
+   once; the reconnect loop stops when VoLTE is off. Anything else is answered "busy" so the
+   app can retry it later. */
+void volte_settings_poll_busy(void)
+{
+    char text[1024];
+    char mode[16] = {0};
+    char request[32] = {0};
+    int refresh = 0, debug = 0;
+
+    if (!g_inited || read_file(REQUEST_PATH, text, sizeof(text)) < 0)
+        return;
+    if (!volte_settings_parse_request(text, mode, sizeof(mode), request, sizeof(request),
+                                      &refresh, &debug))
+        return;
+    if (request[0] && strcmp(request, g_last_request) == 0)
+        return;
+    snprintf(g_last_request, sizeof(g_last_request), "%s", request);
+
+    if (strcmp(mode, "off") == 0)
+        turn_off();
+    else if (debug)
+        run_debug();
+    else if (mode[0])
+        write_status("error", "VoLTE is still connecting; try again in a few minutes. VoLTE off works now.");
+    else
+        write_status("idle", "VoLTE is still connecting. VoLTE off works now.");
+}
+
 void volte_settings_poll(void)
 {
     char text[1024];
@@ -559,6 +592,8 @@ void volte_settings_poll(void)
             write_status("applying", "Turning VoLTE back on...");
             ims_reconnect_reset_radio_budget();
             int ok = reconnect_ims_with_backoff();
+            if (!ok && volte_settings_voice_off())
+                return;
             write_status(ok ? "idle" : "error", ok ? "VoLTE is back on" : "IMS did not connect");
             return;
         }

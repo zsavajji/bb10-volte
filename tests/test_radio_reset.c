@@ -72,9 +72,16 @@ int icon_state(char *buf) { (void)buf; return 0; }
 int find_pid_by_name(const char *name, int strict) { (void)name; (void)strict; return 1; }
 int is_state_ready(const system_state_t *st) { (void)st; return 1; }
 system_state_t get_current_system_state(void) { return g_current_state; }
-int volte_settings_voice_off(void) { return 0; }
+/* The app's "VoLTE off" arrives through the busy poll after g_off_after polls (-1: never). */
+static int g_voice_off, g_off_after = -1, g_busy_polls, g_starts;
+int volte_settings_voice_off(void) { return g_voice_off; }
+void volte_settings_poll_busy(void)
+{
+    if (g_off_after >= 0 && ++g_busy_polls > g_off_after)
+        g_voice_off = 1;
+}
 void stop_ims(void) {}
-void start_ims(void) {}
+void start_ims(void) { g_starts++; }
 void apply_volte_provisioning(void) {}
 void delete_stale_ims_routes(void) {}
 void add_missing_ims_routes(void) {}
@@ -126,6 +133,17 @@ int main(void)
     assert(g_radio_off == 1);
     g_radio_off = 0;
     assert(reset_later() == 2);
+
+    /* VoLTE off from the app while a reconnect is waiting: the loop answers it and stops,
+       without starting ims_rrm again (Thomas, 2.42: the app could not apply it). */
+    g_connected = 0;
+    g_off_after = 3;
+    g_starts = 0;
+    assert(reconnect_ims_with_backoff() == 0);
+    assert(g_voice_off == 1);
+    assert(g_starts == 1);
+    g_voice_off = 0;
+    g_off_after = -1;
 
     puts("radio reset tests passed");
     return 0;

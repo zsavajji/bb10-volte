@@ -30,6 +30,9 @@ void exit_if_stopped(void)
 {
 }
 
+void volte_settings_init(void) {}
+void volte_settings_poll_busy(void) {}
+
 void fix_published_carrier_xml(void)
 {
 }

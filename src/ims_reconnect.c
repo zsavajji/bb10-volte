@@ -33,6 +33,10 @@ int wait_connected(void)
             return 1;
         if (g_stop_requested)
             return 0;
+        volte_settings_poll_busy();
+        /* VoLTE off from the app: this wait is moot. */
+        if (volte_settings_voice_off())
+            return 0;
         if (i % 5 == 0)
         {
             log_msg("[BBE] WAITING:%d", i * 2);
@@ -123,6 +127,10 @@ int reconnect_ims_with_backoff(void)
 
     while (g_lte_monitor_running && attempt <= MAX_RETRY_ATTEMPTS)
     {
+        /* The settings app can turn VoLTE off while this runs (volte_settings_poll_busy). */
+        if (volte_settings_voice_off())
+            return 0;
+
         system_state_t check_st = get_current_system_state();
         if (!is_state_ready(&check_st))
         {
@@ -159,6 +167,7 @@ int reconnect_ims_with_backoff(void)
 
         for (int elapsed = 0; elapsed < backoff && g_lte_monitor_running; elapsed++)
         {
+            volte_settings_poll_busy();
             sleep(1);
         }
 

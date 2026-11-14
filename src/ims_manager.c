@@ -203,7 +203,7 @@ int main(int argc, char *argv[])
 
     if (strcasecmp(action, "provision") == 0)
     {
-        return refresh_carrier_db(1) == 0 ? 0 : 1;
+        return refresh_carrier_db(1) >= 0 ? 0 : 1;
     }
 
     if (strcasecmp(action, "enable") != 0)

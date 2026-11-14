@@ -30,6 +30,7 @@ static int fake_clock(struct timespec *ts)
 
 volatile int g_lte_monitor_running = 1;
 volatile sig_atomic_t g_stop_requested = 0;
+volatile sig_atomic_t g_restart_requested = 0;
 system_state_t g_current_state = {1, 1, 1};
 int g_drop_pending = 0;
 
@@ -74,11 +75,15 @@ int is_state_ready(const system_state_t *st) { (void)st; return 1; }
 system_state_t get_current_system_state(void) { return g_current_state; }
 /* The app's "VoLTE off" arrives through the busy poll after g_off_after polls (-1: never). */
 static int g_voice_off, g_off_after = -1, g_busy_polls, g_starts;
+/* "Restart IMS" or a carrier list download from the app, same way (-1: never). */
+static int g_restart_after = -1, g_restart_polls;
 int volte_settings_voice_off(void) { return g_voice_off; }
 void volte_settings_poll_busy(void)
 {
     if (g_off_after >= 0 && ++g_busy_polls > g_off_after)
         g_voice_off = 1;
+    if (g_restart_after >= 0 && ++g_restart_polls > g_restart_after)
+        g_restart_requested = 1;
 }
 void stop_ims(void) {}
 void start_ims(void) { g_starts++; }
@@ -144,6 +149,17 @@ int main(void)
     assert(g_starts == 1);
     g_voice_off = 0;
     g_off_after = -1;
+
+    /* A restart request from the app while a reconnect is waiting: both the registration wait
+       and the backoff end, and ims_rrm is not started a second time. */
+    g_connected = 0;
+    g_restart_after = 3;
+    g_starts = 0;
+    assert(reconnect_ims_with_backoff() == 0);
+    assert(g_restart_requested == 1);
+    assert(g_starts == 1);
+    g_restart_requested = 0;
+    g_restart_after = -1;
 
     puts("radio reset tests passed");
     return 0;

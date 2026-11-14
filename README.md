@@ -54,7 +54,7 @@ The addon keeps its own carrier list and builds the VoLTE profile for your SIM o
 
 **Carrier list.** The stock list dates from 2017. On first start, and when its copy is over 30 days old, the addon downloads Android's carrier and APN lists from `android.googlesource.com`. It adds the missing carriers to a copy of the stock list and links that copy over `/base/etc/carrier/ids/carrierIds.xml`. The system partition is not modified, and the link is made again at every start. The files live in `data/`: `carrierIds.xml`, `carrierIds.stock.xml` and `carrier-apns.tsv`.
 
-The download needs a working connection. If the phone has no working APN yet, connect to Wi-Fi or set the APN by hand once. If the download fails, the stock list stays in use and the addon tries again at the next start. To refresh the list by hand, run `ims_manager -a provision`.
+The download needs a working connection. If the phone has no working APN yet, connect to Wi-Fi or set the APN by hand once. If the download fails, the stock list stays in use. While the list is missing, the addon tries again every 5 minutes once the phone has service and mobile data, and restarts itself when it gets the list. The VoLTE Manager app (0.1.0.21 and newer, addon 2.43-3 and newer) shows whether the list is missing and has **Download carrier list** and **Restart IMS** buttons. From a shell, `ims_manager -a provision` refreshes the list by hand.
 
 **Profile.** The addon uses `data/carrier-<carrier_id>-volte.xml` if you wrote one. Otherwise it builds `data/carrier-auto-<carrier_id>-volte.xml` at start, from the stock config for that carrier, or from the stock default config plus Android's APNs. It adds an IMS service unless the stock config already has a real one.
 

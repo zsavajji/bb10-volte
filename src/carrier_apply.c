@@ -228,6 +228,7 @@ void link_carrier_db(void)
  * stale. Move it to a thread if that delay shows up on real starts. With no working APN and no
  * Wi-Fi the download can't happen, so the stock list and the default XML stay in use until it can.
  */
+/* 1 when the list was downloaded and linked, 0 when there was nothing to do, -1 when the download failed. */
 int refresh_carrier_db(int force)
 {
     char db[600], stock[600], apns[600];
@@ -260,5 +261,13 @@ int refresh_carrier_db(int force)
     log_msg("[BBE] CARRIER_DB_UPDATED");
     g_built_carrier_id = -1;
     link_carrier_db();
-    return 0;
+    return 1;
+}
+
+/* Without it only the stock list is known, so a carrier it doesn't have gets no profile. */
+int carrier_db_present(void)
+{
+    char db[600];
+    snprintf(db, sizeof(db), "%s/" CARRIER_DB_NAME, g_data_path);
+    return access(db, R_OK) == 0;
 }

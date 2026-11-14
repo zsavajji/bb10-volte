@@ -6,10 +6,11 @@
 /* Pure parsers for the settings UI's two files and for ims_rrm's sip log. No QNX or daemon
  * dependencies, so tests/test_volte_settings.c can feed them text on the host. */
 
-/* "mode=sip-learned\nrefresh=1\nrequest=1234\n"; "knob=<name>:<0|1>" is copied to knob as is. */
+/* "mode=sip-learned\nrefresh=1\nrequest=1234\n"; "knob=<name>:<0|1>" is copied to knob as is, and
+   "action=restart" or "action=fetch" (restart IMS, download the carrier list) to action. */
 int volte_settings_parse_request(const char *text, char *mode, size_t mode_len,
                                  char *request, size_t request_len, int *refresh, int *debug,
-                                 char *knob, size_t knob_len);
+                                 char *knob, size_t knob_len, char *action, size_t action_len);
 
 /* The operator's own domain from the registered IMPU: P-Associated-URI, <uri>, or the
  * From:/To: of the reg-event NOTIFY. Domains ending in .3gppnetwork.org and

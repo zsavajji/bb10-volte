@@ -192,8 +192,10 @@ int main(void)
     g_last_log[0] = '\0';
     assert(refresh_carrier_db(0) == 0);
     assert(g_last_log[0] == '\0');
+    assert(carrier_db_present() == 1);
     assert(utimes(db, older) == 0 && utimes(bin, NULL) == 0);
-    assert(refresh_carrier_db(0) == 0);
+    /* 1: it downloaded a new list, which is what makes the app's buttons restart the daemon. */
+    assert(refresh_carrier_db(0) == 1);
     assert(strcmp(g_last_log, "[BBE] CARRIER_DB_UPDATED") == 0 || strcmp(g_last_log, "[BBE] CARRIER_DB_LINKED") == 0);
     remove(db);
     remove(bin);

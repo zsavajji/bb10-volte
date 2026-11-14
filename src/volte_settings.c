@@ -4,6 +4,8 @@
 #include "ims_carrier_config.h"
 #include "carrier_lookup.h"
 #include "ims_reconnect.h"
+#include "carrier_apply.h"
+#include "pps_monitor.h"
 #include "system_state.h"
 #include "sys_utils.h"
 #include "zip_writer.h"
@@ -246,10 +248,12 @@ static void write_status(const char *state, const char *message)
              "auto_state=%s\n"
              "auto_note=%s\n"
              "knobs=%s\n"
+             "carrier_list=%s\n"
              "updated=%ld\n",
              g_last_request, g_carrier_id, g_mode, state, g_imsi, g_learned,
              g_call.result, g_call.uri, g_debug_state, g_debug_file, g_message,
-             g_selection, g_auto_state, g_auto_note, knobs, (long)time(NULL));
+             g_selection, g_auto_state, g_auto_note, knobs,
+             carrier_db_present() ? "ok" : "missing", (long)time(NULL));
     write_file(STATUS_PATH, buf, 0666);
 }
 
@@ -430,13 +434,14 @@ void volte_settings_init(void)
         log_msg("[BBE] RTCP_BW: patch on for carrier %d", g_carrier_id);
 
     /* A request left from before this start was already handled (or is stale, like a debug
-       run): only a newer one, written while the daemon runs, counts. */
+       run): only a newer one, written while the daemon runs, counts. This also stops a restart
+       or fetch request from the app from running again after the daemon starts over for it. */
     {
-        char text[1024], m[16], req[32] = {0}, k[32];
+        char text[1024], m[16], req[32] = {0}, k[32], a[16];
         int r, d;
         if (read_file(REQUEST_PATH, text, sizeof(text)) >= 0 &&
             volte_settings_parse_request(text, m, sizeof(m), req, sizeof(req), &r, &d, k,
-                                         sizeof(k)))
+                                         sizeof(k), a, sizeof(a)))
             snprintf(g_last_request, sizeof(g_last_request), "%s", req);
     }
 
@@ -634,6 +639,50 @@ static void apply_knob(char *spec)
     write_status(ok ? "idle" : "error", ok ? "Saved; VoLTE restarted" : "IMS did not connect");
 }
 
+/* Downloads the carrier list now. A new list needs its XML built and reloaded, which only a
+   clean start does, so the daemon starts over (as for a new SIM). A restart drops IMS, so not
+   during a call. */
+static void fetch_carrier_list(void)
+{
+    if (call_active())
+    {
+        write_status("error", "A call is in progress; try again");
+        return;
+    }
+    write_status("applying", "Downloading the carrier list...");
+    log_msg("[BBE] FETCH: carrier list requested from the settings app");
+    if (refresh_carrier_db(1) < 0)
+    {
+        write_status("error", "Download failed. Connect to Wi-Fi or switch Mobile Data on, then try again");
+        return;
+    }
+    write_status("applying", "Carrier list updated. Restarting VoLTE...");
+    request_daemon_restart();
+}
+
+/* Same path as Apply with the stored format. With no carrier list yet there is no profile to
+   restart with (first run, or a reinstall wiped it), so that fetches it first. */
+static void restart_ims(void)
+{
+    if (call_active())
+    {
+        write_status("error", "A call is in progress; try again");
+        return;
+    }
+    if (volte_settings_voice_off())
+    {
+        write_status("error", "VoLTE is off. Choose Automatic or a format and tap Apply to turn it on");
+        return;
+    }
+    log_msg("[BBE] RESTART_IMS: requested from the settings app");
+    if (!carrier_db_present())
+    {
+        fetch_carrier_list();
+        return;
+    }
+    apply_mode(g_mode, "IMS restarted");
+}
+
 /* The dial format (g_mode) stays, so turning VoLTE back on returns to it. */
 static void turn_off(void)
 {
@@ -660,12 +709,13 @@ void volte_settings_poll_busy(void)
     char mode[16] = {0};
     char request[32] = {0};
     char knob[32] = {0};
+    char action[16] = {0};
     int refresh = 0, debug = 0;
 
     if (!g_inited || read_file(REQUEST_PATH, text, sizeof(text)) < 0)
         return;
     if (!volte_settings_parse_request(text, mode, sizeof(mode), request, sizeof(request),
-                                      &refresh, &debug, knob, sizeof(knob)))
+                                      &refresh, &debug, knob, sizeof(knob), action, sizeof(action)))
         return;
     if (request[0] && strcmp(request, g_last_request) == 0)
         return;
@@ -675,7 +725,22 @@ void volte_settings_poll_busy(void)
         turn_off();
     else if (debug)
         run_debug();
-    else if (mode[0] || knob[0])
+    else if (strcmp(action, "fetch") == 0)
+        fetch_carrier_list();
+    else if (strcmp(action, "restart") == 0 && g_lte_monitor_running && !volte_settings_voice_off())
+    {
+        /* Stuck reconnecting: drop the attempt and start clean. Before the monitor runs, the
+           daemon is still starting up, which is the same thing. */
+        if (call_active())
+            write_status("error", "A call is in progress; try again");
+        else
+        {
+            log_msg("[BBE] RESTART_IMS: requested from the settings app while reconnecting");
+            write_status("applying", "Restarting VoLTE...");
+            request_daemon_restart();
+        }
+    }
+    else if (mode[0] || knob[0] || action[0])
         write_status("error", "VoLTE is still connecting; try again in a few minutes. VoLTE off works now.");
     else
         write_status("idle", "VoLTE is still connecting. VoLTE off works now.");
@@ -687,6 +752,7 @@ void volte_settings_poll(void)
     char mode[16] = {0};
     char request[32] = {0};
     char knob[32] = {0};
+    char action[16] = {0};
     int refresh = 0, debug = 0;
 
     if (!g_inited)
@@ -703,7 +769,7 @@ void volte_settings_poll(void)
     if (read_file(REQUEST_PATH, text, sizeof(text)) < 0)
         return;
     if (!volte_settings_parse_request(text, mode, sizeof(mode), request, sizeof(request),
-                                      &refresh, &debug, knob, sizeof(knob)))
+                                      &refresh, &debug, knob, sizeof(knob), action, sizeof(action)))
         return;
     if (request[0] && strcmp(request, g_last_request) == 0)
         return;
@@ -711,6 +777,17 @@ void volte_settings_poll(void)
 
     (void)refresh;
     scan_log();
+
+    if (strcmp(action, "fetch") == 0)
+    {
+        fetch_carrier_list();
+        return;
+    }
+    if (strcmp(action, "restart") == 0)
+    {
+        restart_ims();
+        return;
+    }
 
     /* Apply always reapplies, even the current mode: it is the user's way to bring the live
        config back in line with the stored mode. */

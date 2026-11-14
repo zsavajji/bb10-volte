@@ -11,33 +11,42 @@
 
 static void test_request(void)
 {
-    char mode[16], request[32], knob[32];
+    char mode[16], request[32], knob[32], action[16];
     int refresh = 0, debug = 0;
 
     assert(volte_settings_parse_request("mode=sip-learned\nrefresh=1\nrequest=42\n",
                                         mode, sizeof(mode), request, sizeof(request),
-                                        &refresh, &debug, knob, sizeof(knob)) == 1);
+                                        &refresh, &debug, knob, sizeof(knob), action, sizeof(action)) == 1);
     assert(strcmp(mode, "sip-learned") == 0);
     assert(strcmp(request, "42") == 0);
     assert(refresh == 1 && debug == 0);
 
     assert(volte_settings_parse_request("debug=1\nrequest=7\n", mode, sizeof(mode),
-                                        request, sizeof(request), &refresh, &debug, knob, sizeof(knob)) == 1);
+                                        request, sizeof(request), &refresh, &debug, knob, sizeof(knob), action, sizeof(action)) == 1);
     assert(strcmp(mode, "") == 0);
     assert(strcmp(request, "7") == 0);
     assert(debug == 1 && refresh == 0);
 
     assert(volte_settings_parse_request("knob=rtcp-bw:1\nrequest=5\n", mode, sizeof(mode),
                                         request, sizeof(request), &refresh, &debug, knob,
-                                        sizeof(knob)) == 1);
+                                        sizeof(knob), action, sizeof(action)) == 1);
     assert(strcmp(knob, "rtcp-bw:1") == 0);
     assert(strcmp(mode, "") == 0);
 
+    assert(volte_settings_parse_request("action=fetch\nrequest=9\n", mode, sizeof(mode), request,
+                                        sizeof(request), &refresh, &debug, knob, sizeof(knob),
+                                        action, sizeof(action)) == 1);
+    assert(strcmp(action, "fetch") == 0 && strcmp(mode, "") == 0 && strcmp(knob, "") == 0);
+    assert(volte_settings_parse_request("action=restart\nrequest=10\n", mode, sizeof(mode), request,
+                                        sizeof(request), &refresh, &debug, knob, sizeof(knob),
+                                        action, sizeof(action)) == 1);
+    assert(strcmp(action, "restart") == 0);
+
     /* No request stamp: not a new request. */
     assert(volte_settings_parse_request("mode=tel\n", mode, sizeof(mode), request,
-                                        sizeof(request), &refresh, &debug, knob, sizeof(knob)) == 0);
+                                        sizeof(request), &refresh, &debug, knob, sizeof(knob), action, sizeof(action)) == 0);
     assert(volte_settings_parse_request(NULL, mode, sizeof(mode), request, sizeof(request),
-                                        &refresh, &debug, knob, sizeof(knob)) == 0);
+                                        &refresh, &debug, knob, sizeof(knob), action, sizeof(action)) == 0);
 }
 
 static void test_learned_domain(void)

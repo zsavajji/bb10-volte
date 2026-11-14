@@ -1,6 +1,7 @@
 #include "pps_monitor.h"
 #include "sys_utils.h"
 #include "berry_monitor.h"
+#include "carrier_apply.h"
 #include "daemon_stats.h"
 #include "ims_control.h"
 #include "ims_reconnect.h"
@@ -28,8 +29,18 @@ enum
     FD_COUNT
 };
 
+#define CARRIER_DB_RETRY_SEC 300 /* between automatic downloads while the carrier list is missing */
+
 static pthread_t g_lte_thread;
 volatile int g_lte_monitor_running = 0;
+
+/* Starts the whole startup path again in the same process: the new SIM, or a carrier list that
+   was just downloaded, need their XML built and reloaded. */
+void request_daemon_restart(void)
+{
+    g_restart_requested = 1;
+    kill(getpid(), SIGHUP); /* wakes the main thread's sleep() */
+}
 
 /* --- Background Multi-PPS Monitor Thread --- */
 
@@ -94,6 +105,27 @@ static void *detailed_pps_monitor_thread(void *arg)
 
         add_missing_ims_routes();
         volte_settings_poll();
+        if (g_restart_requested)
+            break;
+
+        /* The list is fetched once at start; if that failed (data off, no APN yet) nothing else
+           asks again, and without it the SIM gets no profile and IMS never registers.
+           ponytail: the download blocks this thread for up to ~20 s offline, every 5 minutes;
+           move it to its own thread if that matters. */
+        static time_t last_db_try = 0;
+        time_t now = time(NULL);
+        if (!carrier_db_present() && is_state_ready(&g_current_state) &&
+            (last_db_try == 0 || now - last_db_try >= CARRIER_DB_RETRY_SEC))
+        {
+            last_db_try = now;
+            if (refresh_carrier_db(0) > 0)
+            {
+                log_msg("[BBE] CARRIER_DB_RETRY: downloaded, restarting");
+                request_daemon_restart();
+                break;
+            }
+        }
+
         sync_voice_flag(1);
         check_ims_health(&was_ready);
 
@@ -130,8 +162,7 @@ static void *detailed_pps_monitor_thread(void *arg)
         /* Another carrier's SIM needs the whole startup path: its XML, the reload and a new ims_rrm. */
         if (new_state.sim_ok && sim_carrier_changed())
         {
-            g_restart_requested = 1;
-            kill(getpid(), SIGHUP); /* wakes the main thread's sleep() */
+            request_daemon_restart();
             break;
         }
 
@@ -236,12 +267,12 @@ int run_until_stopped(int with_berry)
 
     if (g_restart_requested && !g_stop_requested)
     {
-        /* Same process and pid: the startup path then waits for the new SIM, builds and
+        /* Same process and pid: the startup path then waits for the new SIM or list, builds and
            reloads its XML and restarts ims_rrm, as a reboot would. */
         char self[600];
         snprintf(self, sizeof(self), "%s/ims_manager", g_init_path);
         char *args[] = {self, "-a", "enable", "-r", NULL};
-        log_msg("[BBE] RESTARTING_FOR_SIM");
+        log_msg("[BBE] RESTARTING: startup path again (new SIM, new carrier list or settings app)");
         execv(self, args);
         log_msg("[BBE] RESTART_FAILED: %d", errno);
     }

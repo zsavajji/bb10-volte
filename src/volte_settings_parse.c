@@ -17,7 +17,7 @@ static char *trim(char *s)
 
 int volte_settings_parse_request(const char *text, char *mode, size_t mode_len,
                                  char *request, size_t request_len, int *refresh, int *debug,
-                                 char *knob, size_t knob_len)
+                                 char *knob, size_t knob_len, char *action, size_t action_len)
 {
     char *copy, *line, *save = NULL;
     int have_request = 0;
@@ -28,6 +28,8 @@ int volte_settings_parse_request(const char *text, char *mode, size_t mode_len,
         request[0] = '\0';
     if (knob_len)
         knob[0] = '\0';
+    if (action_len)
+        action[0] = '\0';
     if (refresh)
         *refresh = 0;
     if (debug)
@@ -54,6 +56,8 @@ int volte_settings_parse_request(const char *text, char *mode, size_t mode_len,
             snprintf(mode, mode_len, "%s", value);
         else if (strcmp(key, "knob") == 0 && knob_len)
             snprintf(knob, knob_len, "%s", value);
+        else if (strcmp(key, "action") == 0 && action_len)
+            snprintf(action, action_len, "%s", value);
         else if (strcmp(key, "request") == 0)
         {
             snprintf(request, request_len, "%s", value);

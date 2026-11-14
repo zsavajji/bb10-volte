@@ -34,8 +34,8 @@ int wait_connected(void)
         if (g_stop_requested)
             return 0;
         volte_settings_poll_busy();
-        /* VoLTE off from the app: this wait is moot. */
-        if (volte_settings_voice_off())
+        /* The app asked for a restart, or VoLTE off: this wait is moot. */
+        if (volte_settings_voice_off() || g_restart_requested)
             return 0;
         if (i % 5 == 0)
         {
@@ -127,8 +127,9 @@ int reconnect_ims_with_backoff(void)
 
     while (g_lte_monitor_running && attempt <= MAX_RETRY_ATTEMPTS)
     {
-        /* The settings app can turn VoLTE off while this runs (volte_settings_poll_busy). */
-        if (volte_settings_voice_off())
+        /* The settings app can turn VoLTE off or restart the daemon while this runs
+           (volte_settings_poll_busy). */
+        if (volte_settings_voice_off() || g_restart_requested)
             return 0;
 
         system_state_t check_st = get_current_system_state();
@@ -165,7 +166,7 @@ int reconnect_ims_with_backoff(void)
         log_msg("[BBE] RECONNECT_FAILED_WAITING:%ds", backoff);
         LOG_VERBOSE("Reconnect attempt %d failed. Retrying in %d seconds...", attempt, backoff);
 
-        for (int elapsed = 0; elapsed < backoff && g_lte_monitor_running; elapsed++)
+        for (int elapsed = 0; elapsed < backoff && g_lte_monitor_running && !g_restart_requested; elapsed++)
         {
             volte_settings_poll_busy();
             sleep(1);

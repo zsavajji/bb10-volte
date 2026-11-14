@@ -13,6 +13,7 @@ extern volatile sig_atomic_t g_reset_stats_requested;
 void start_lte_monitor(void);
 void exit_if_stopped(void);
 int run_until_stopped(int with_berry);
+void request_daemon_restart(void);
 
 /* Defined in ims_manager.c, next to the signal handler. */
 void log_stop_sender(void);

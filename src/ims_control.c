@@ -185,6 +185,12 @@ void write_dca_configs(void)
              /* ponytail: HD Voice on for every network; add per-carrier
                 handling if one rejects AMR-WB. */
              "AudioConfig:json:{\"HDvoice\":true}\n"
+             /* Values from the stock config of a carrier that ships them (BlackBerry's own
+                PPS DB). They let ims_rrm hand a VoLTE call the network refuses (SilentRedial)
+                or doesn't answer in time (SIP_Timer_CSFB) back to the phone service to redial
+                over CS (3G or 2G). Which error codes trigger the redial is not verified yet. */
+             "SilentRedial:b:true\n"
+             "SIP_Timer_CSFB:n:6\n"
              "%s",
              dial_cfg);
 

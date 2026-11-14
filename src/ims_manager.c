@@ -224,6 +224,24 @@ int main(int argc, char *argv[])
     /* Load the dial mode for this carrier and write the settings app's status file. */
     volte_settings_init();
 
+    /* VoLTE is off, by the user's choice or because every dial format was refused on this
+       network: leave ims_rrm stopped, even one still registered from before, so calls use 3G or
+       2G. The monitor thread stays, since it polls the settings app's requests (turning VoLTE
+       back on). No berry monitor: it follows IMS. */
+    if (volte_settings_voice_off())
+    {
+        log_msg("[BBE] VOLTE_OFF: network refused every dial format; calls use 3G or 2G");
+        write_dca_configs();
+        if (push_dca_configs() != 0)
+            log_msg("[BBE] DCA_FAILED: VoLTE off");
+        /* The carrier profile stays, so turning VoLTE back on has what ims_rrm needs. */
+        apply_carrier_xml();
+        append_file("/pps/services/escreens/config", "voice_domain_preference_EUTRAN_override::5\n");
+        stop_ims();
+        start_lte_monitor();
+        return run_until_stopped(0);
+    }
+
     if (ims_connected_pps() && incoming_ready_pps() && !force_refresh)
     {
         LOG_VERBOSE("IMS and incoming services already connected, starting background monitors");
@@ -232,7 +250,7 @@ int main(int argc, char *argv[])
         start_lte_monitor();
         log_msg("[BBE] ALREADY_CONNECTED");
 
-        return run_until_stopped();
+        return run_until_stopped(1);
     }
 
     log_msg("[BBE] APPLYING");
@@ -286,5 +304,5 @@ int main(int argc, char *argv[])
     /* The monitor also retries when the first registration did not succeed. */
     start_lte_monitor();
 
-    return run_until_stopped();
+    return run_until_stopped(1);
 }

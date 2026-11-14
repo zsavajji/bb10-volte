@@ -11,8 +11,15 @@
 void volte_settings_init(void);
 void volte_settings_poll(void);
 
+/* The phone status PPS changed: after the next call ends, check how its dial format fared. */
+void volte_settings_phone_changed(void);
+
 /* For write_dca_configs(): "tel", "sip-imsi" or "sip-learned", and the learned domain. */
 const char *volte_settings_mode(void);
 const char *volte_settings_domain(void);
+
+/* 1 while VoLTE is off, either turned off by the user or because automatic selection found every
+   dial format refused: IMS stays stopped, calls use 3G. */
+int volte_settings_voice_off(void);
 
 #endif /* VOLTE_SETTINGS_H */

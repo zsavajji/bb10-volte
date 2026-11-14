@@ -72,6 +72,7 @@ int icon_state(char *buf) { (void)buf; return 0; }
 int find_pid_by_name(const char *name, int strict) { (void)name; (void)strict; return 1; }
 int is_state_ready(const system_state_t *st) { (void)st; return 1; }
 system_state_t get_current_system_state(void) { return g_current_state; }
+int volte_settings_voice_off(void) { return 0; }
 void stop_ims(void) {}
 void start_ims(void) {}
 void apply_volte_provisioning(void) {}

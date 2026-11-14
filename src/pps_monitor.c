@@ -24,6 +24,7 @@ enum
     FD_RADIO = 0,
     FD_UICC,
     FD_DATA,
+    FD_PHONE,
     FD_COUNT
 };
 
@@ -36,7 +37,8 @@ static void *detailed_pps_monitor_thread(void *arg)
 {
     (void)arg;
     struct pollfd pfds[FD_COUNT];
-    const char *paths[FD_COUNT] = {PPS_RADIO_PATH, PPS_UICC_PATH, PPS_DATA_PATH};
+    const char *paths[FD_COUNT] = {PPS_RADIO_PATH, PPS_UICC_PATH, PPS_DATA_PATH,
+                                   "/pps/services/phone/public/status"};
 
     for (int i = 0; i < FD_COUNT; i++)
     {
@@ -45,6 +47,12 @@ static void *detailed_pps_monitor_thread(void *arg)
 
         if (pfds[i].fd < 0)
         {
+            /* Only the automatic dial-mode check needs the phone status: run without it. */
+            if (i == FD_PHONE)
+            {
+                log_msg("[BBE] PPS_OPEN_FAILED: %s", paths[i]);
+                continue;
+            }
             LOG_VERBOSE("Failed to open PPS: %s", paths[i]);
             for (int j = 0; j < i; j++)
                 close(pfds[j].fd);
@@ -75,6 +83,15 @@ static void *detailed_pps_monitor_thread(void *arg)
             stats_export_to_file();
         }
 
+        /* Right after a reboot the phone service may not have published its status yet
+           (thomas-6: PPS_OPEN_FAILED at 14:02:49): keep trying, it costs one open(). */
+        if (pfds[FD_PHONE].fd < 0)
+        {
+            pfds[FD_PHONE].fd = open(paths[FD_PHONE], O_RDONLY | O_NONBLOCK);
+            if (pfds[FD_PHONE].fd >= 0)
+                log_msg("[BBE] PPS_OPENED: %s", paths[FD_PHONE]);
+        }
+
         add_missing_ims_routes();
         volte_settings_poll();
         sync_voice_flag(1);
@@ -83,7 +100,8 @@ static void *detailed_pps_monitor_thread(void *arg)
         /* PPS changes wake this at once; the timeout only drives the periodic checks.
            Poll each second only while waiting for IMS, so STATS_OK times recovery. The
            timeout also bounds how long stop_lte_monitor() waits. */
-        int timeout_ms = (!was_ready && is_state_ready(&g_current_state)) ? 1000 : 5000;
+        int timeout_ms = (!was_ready && is_state_ready(&g_current_state) && !volte_settings_voice_off())
+                             ? 1000 : 5000;
         int poll_res = poll(pfds, FD_COUNT, timeout_ms);
 
         if (poll_res < 0)
@@ -97,11 +115,13 @@ static void *detailed_pps_monitor_thread(void *arg)
 
         for (int i = 0; i < FD_COUNT; i++)
         {
-            if (pfds[i].revents & (POLLIN | POLLPRI))
+            if (pfds[i].fd >= 0 && (pfds[i].revents & (POLLIN | POLLPRI)))
             {
                 char buf[1024];
                 ssize_t bytes = read(pfds[i].fd, buf, sizeof(buf) - 1);
                 (void)bytes;
+                if (i == FD_PHONE)
+                    volte_settings_phone_changed();
             }
         }
 
@@ -135,7 +155,8 @@ static void *detailed_pps_monitor_thread(void *arg)
                     stop_ims();
                 was_ready = 0;
             }
-            else if (!was_ready && is_ready && find_pid_by_name("ims_rrm", 0) <= 0)
+            else if (!was_ready && is_ready && find_pid_by_name("ims_rrm", 0) <= 0 &&
+                     !volte_settings_voice_off())
             {
                 log_msg("[BBE] RESTORED: STARTING_RECONNECT");
 
@@ -159,7 +180,8 @@ static void *detailed_pps_monitor_thread(void *arg)
 
     for (int i = 0; i < FD_COUNT; i++)
     {
-        close(pfds[i].fd);
+        if (pfds[i].fd >= 0)
+            close(pfds[i].fd);
     }
 
     return NULL;
@@ -195,12 +217,14 @@ void exit_if_stopped(void)
     }
 }
 
-int run_until_stopped(void)
+/* with_berry: the berry thread ending (a second daemon holds its lock) also ends the daemon.
+   The VoLTE-off start runs without it. */
+int run_until_stopped(int with_berry)
 {
     /* A stop signal interrupts sleep(), since only this thread takes it (start_worker).
        ponytail: a signal landing between the check and sleep() waits out the 60 s;
        sigsuspend() with the signal blocked closes that if it ever matters. */
-    while (g_berry_running && !g_stop_requested && !g_restart_requested)
+    while ((g_berry_running || !with_berry) && !g_stop_requested && !g_restart_requested)
     {
         sleep(60);
     }

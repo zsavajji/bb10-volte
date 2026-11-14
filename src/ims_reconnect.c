@@ -6,6 +6,7 @@
 #include "ims_routes.h"
 #include "pps_monitor.h"
 #include "system_state.h"
+#include "volte_settings.h"
 
 #include <stdio.h>
 #include <time.h>
@@ -113,6 +114,13 @@ int reconnect_ims_with_backoff(void)
     int attempt = 1;
     int backoff = INITIAL_BACKOFF_SEC;
 
+    /* VoLTE is off on this network: IMS stays stopped so calls use 3G or 2G. */
+    if (volte_settings_voice_off())
+    {
+        LOG_VERBOSE("IMS reconnect skipped: VoLTE is off");
+        return 0;
+    }
+
     while (g_lte_monitor_running && attempt <= MAX_RETRY_ATTEMPTS)
     {
         system_state_t check_st = get_current_system_state();
@@ -184,6 +192,10 @@ void check_ims_health(int *was_ready)
     static time_t last_check = 0;
     static time_t down_since = 0;
     static int retry_wait = IMS_DOWN_GRACE_SEC;
+
+    /* IMS is left stopped on purpose, so there is no failure to count or retry. */
+    if (volte_settings_voice_off())
+        return;
 
     if (!is_state_ready(&g_current_state))
     {

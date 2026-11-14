@@ -159,18 +159,14 @@ static void uri_domain(const char *line, char *out, size_t out_len)
     domain_from_line(r, out, out_len, &is_3gpp);
 }
 
-void volte_settings_parse_last_call(const char *slog, char *result, size_t result_len,
-                                    char *uri, size_t uri_len)
+void volte_settings_parse_last_call(const char *slog, volte_call_t *call)
 {
     char *copy, *line, *save = NULL;
-    int have_call = 0, connected = 0, in_progress = 0, code = 0;
+    int have_call = 0;
     int detail_1223 = 0;
     int reg_subscribe = 0;
 
-    if (result_len)
-        result[0] = '\0';
-    if (uri_len)
-        uri[0] = '\0';
+    memset(call, 0, sizeof(*call));
     if (!slog)
         return;
 
@@ -192,42 +188,100 @@ void volte_settings_parse_last_call(const char *slog, char *result, size_t resul
         }
         else if (strstr(line, "createOutDialog(): R-URI:"))
         {
+            const char *c;
+
             have_call = 1;
-            connected = 0;
-            in_progress = 1;
-            code = 0;
-            uri_domain(line, uri, uri_len);
+            call->connected = 0;
+            call->in_progress = 1;
+            call->code = 0;
+            call->uri[0] = '\0';
+            uri_domain(line, call->uri, sizeof(call->uri));
+
+            /* djb2 of the line, which holds the number: the hash is all that leaves this
+               function, so a repeated log yields the same id and a new call a new one. */
+            call->id = 5381;
+            for (c = line; *c; c++)
+                call->id = call->id * 33 + (unsigned char)*c;
         }
         else if (strstr(line, "Service Unavailable (1:223)"))
         {
             detail_1223 = 1;
         }
-        else if (strstr(line, "onDialogStateChange") && strstr(line, "=> 4"))
+        /* State 2 is the answered call. 4 is the end, which a refused call reaches straight
+           from 0 (Telekom 503: "0 => 4"), so it says nothing about connecting. */
+        else if (strstr(line, "onDialogStateChange") && strstr(line, "=> 2"))
         {
-            connected = 1;
-            in_progress = 0;
+            call->connected = 1;
+            call->in_progress = 0;
         }
         else if (strstr(line, "onDialogEnded"))
         {
             const char *c = strstr(line, "code ");
             if (c)
-                code = atoi(c + 5);
-            in_progress = 0;
+                call->code = atoi(c + 5);
+            call->in_progress = 0;
         }
     }
 
     if (!have_call)
-        snprintf(result, result_len, "no call seen");
-    else if (in_progress)
-        snprintf(result, result_len, "in progress");
-    else if (connected)
-        snprintf(result, result_len, "connected");
-    else if (code == 503 && detail_1223)
-        snprintf(result, result_len, "503 (1:223)");
-    else if (code)
-        snprintf(result, result_len, "failed (%d)", code);
+        snprintf(call->result, sizeof(call->result), "no call seen");
+    else if (call->in_progress)
+        snprintf(call->result, sizeof(call->result), "in progress");
+    else if (call->connected)
+        snprintf(call->result, sizeof(call->result), "connected");
+    else if (call->code == 503 && detail_1223)
+        snprintf(call->result, sizeof(call->result), "503 (1:223)");
+    else if (call->code)
+        snprintf(call->result, sizeof(call->result), "failed (%d)", call->code);
     else
-        snprintf(result, result_len, "unknown");
+        snprintf(call->result, sizeof(call->result), "unknown");
 
     free(copy);
+}
+
+char volte_mode_letter(const char *mode)
+{
+    if (!mode)
+        return 0;
+    if (strcmp(mode, "tel") == 0)
+        return 't';
+    if (strcmp(mode, "sip-imsi") == 0)
+        return 'i';
+    if (strcmp(mode, "sip-learned") == 0)
+        return 'l';
+    return 0;
+}
+
+const char *volte_mode_from_letter(char letter)
+{
+    return letter == 't' ? "tel" : letter == 'i' ? "sip-imsi" : letter == 'l' ? "sip-learned" : NULL;
+}
+
+const char *volte_auto_next(const char *failed, int learned_differs)
+{
+    if (!failed)
+        failed = "";
+    if (!strchr(failed, 't'))
+        return "tel";
+    if (learned_differs && !strchr(failed, 'l'))
+        return "sip-learned";
+    if (!strchr(failed, 'i'))
+        return "sip-imsi";
+    return NULL;
+}
+
+int volte_call_refused(const volte_call_t *call)
+{
+    return !call->connected && call->code == 503;
+}
+
+const char *volte_call_mode(const volte_call_t *call, const char *imsi_domain)
+{
+    if (call->uri[0] == '\0')
+        return NULL;
+    if (strcmp(call->uri, "tel:") == 0)
+        return "tel";
+    if (imsi_domain && strcmp(call->uri, imsi_domain) == 0)
+        return "sip-imsi";
+    return "sip-learned";
 }

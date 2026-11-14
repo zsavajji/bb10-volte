@@ -77,6 +77,8 @@ system_state_t get_current_system_state(void) { return g_current_state; }
 static int g_voice_off, g_off_after = -1, g_busy_polls, g_starts;
 /* "Restart IMS" or a carrier list download from the app, same way (-1: never). */
 static int g_restart_after = -1, g_restart_polls;
+/* A SIGTERM from start.sh, inside stop_ims or after g_stop_after polls (-1: never). */
+static int g_stop_in_stop_ims, g_stop_after = -1, g_stop_polls;
 int volte_settings_voice_off(void) { return g_voice_off; }
 void volte_settings_poll_busy(void)
 {
@@ -84,8 +86,16 @@ void volte_settings_poll_busy(void)
         g_voice_off = 1;
     if (g_restart_after >= 0 && ++g_restart_polls > g_restart_after)
         g_restart_requested = 1;
+    if (g_stop_after >= 0 && ++g_stop_polls > g_stop_after)
+        g_stop_requested = 1;
 }
-void stop_ims(void) {}
+static int g_stops;
+void stop_ims(void)
+{
+    g_stops++;
+    if (g_stop_in_stop_ims)
+        g_stop_requested = 1;
+}
 void start_ims(void) { g_starts++; }
 void apply_volte_provisioning(void) {}
 void delete_stale_ims_routes(void) {}
@@ -110,6 +120,16 @@ static void connect_ims(void)
     check_ims_health(&was_ready);
     assert(was_ready == 1);
     g_connected = 0;
+}
+
+/* Makes a radio reset eligible, so only the loop's own checks can keep it from happening. */
+static void arm_reset(void)
+{
+    connect_ims();
+    g_connected = 0;
+    g_now += RADIO_RESET_MIN_INTERVAL_SEC + 1;
+    g_power_writes = 0;
+    g_radio_off = 0;
 }
 
 int main(void)
@@ -141,25 +161,61 @@ int main(void)
 
     /* VoLTE off from the app while a reconnect is waiting: the loop answers it and stops,
        without starting ims_rrm again (Thomas, 2.42: the app could not apply it). */
-    g_connected = 0;
+    arm_reset();
     g_off_after = 3;
     g_starts = 0;
     assert(reconnect_ims_with_backoff() == 0);
     assert(g_voice_off == 1);
     assert(g_starts == 1);
+    assert(g_power_writes == 0);
     g_voice_off = 0;
     g_off_after = -1;
 
     /* A restart request from the app while a reconnect is waiting: both the registration wait
        and the backoff end, and ims_rrm is not started a second time. */
-    g_connected = 0;
+    arm_reset();
     g_restart_after = 3;
     g_starts = 0;
     assert(reconnect_ims_with_backoff() == 0);
     assert(g_restart_requested == 1);
     assert(g_starts == 1);
+    assert(g_power_writes == 0);
     g_restart_requested = 0;
     g_restart_after = -1;
+
+    /* A stop signal (start.sh during an update) already pending: nothing starts, and a running
+       ims_rrm is left alone for the next daemon. */
+    arm_reset();
+    g_stop_requested = 1;
+    g_starts = 0;
+    g_stops = 0;
+    assert(reconnect_ims_with_backoff() == 0);
+    assert(g_stops == 0);
+    assert(g_starts == 0);
+    assert(g_power_writes == 0);
+    g_stop_requested = 0;
+
+    /* It arrives while ims_rrm is stopping: ims_rrm is not started afterwards. */
+    arm_reset();
+    g_stop_in_stop_ims = 1;
+    g_starts = 0;
+    assert(reconnect_ims_with_backoff() == 0);
+    assert(g_starts == 0);
+    assert(g_power_writes == 0);
+    g_stop_in_stop_ims = 0;
+    g_stop_requested = 0;
+
+    /* It arrives during the registration wait: no radio reset for a wait that was cut short. */
+    arm_reset();
+    g_stop_after = 3;
+    g_stop_polls = 0;
+    g_starts = 0;
+    assert(reconnect_ims_with_backoff() == 0);
+    assert(g_stop_requested == 1);
+    assert(g_starts == 1);
+    assert(g_power_writes == 0);
+    g_stop_after = -1;
+    g_stop_requested = 0;
 
     puts("radio reset tests passed");
     return 0;

@@ -129,7 +129,7 @@ int reconnect_ims_with_backoff(void)
     {
         /* The settings app can turn VoLTE off or restart the daemon while this runs
            (volte_settings_poll_busy). */
-        if (volte_settings_voice_off() || g_restart_requested)
+        if (volte_settings_voice_off() || g_restart_requested || g_stop_requested)
             return 0;
 
         system_state_t check_st = get_current_system_state();
@@ -150,6 +150,10 @@ int reconnect_ims_with_backoff(void)
         log_msg("[BBE] RECONNECT_ATTEMPT:%d", attempt);
 
         stop_ims();
+        /* A stop that arrived while ims_rrm was stopping (start.sh during an update, a shutdown)
+           must not start an ims_rrm that the next daemon then has to kill. */
+        if (g_stop_requested)
+            return 0;
         apply_volte_provisioning();
         delete_stale_ims_routes();
         start_ims();
@@ -160,6 +164,12 @@ int reconnect_ims_with_backoff(void)
             LOG_VERBOSE("IMS successfully connected on attempt %d", attempt);
             return 1;
         }
+
+        /* wait_connected() ended early for one of these, which says nothing about a stalled
+           connection, so the radio must not be power-cycled (a daemon killed between radio OFF
+           and ON would leave the phone with no network). */
+        if (g_stop_requested || g_restart_requested || volte_settings_voice_off())
+            return 0;
 
         reset_radio_if_stalled();
 

@@ -13,6 +13,7 @@
 char g_mcc[4] = {0};
 char g_mnc[4] = {0};
 char g_gid1[41] = {0};
+unsigned long g_sim_id = 0;
 system_state_t g_current_state = {0};
 
 /* --- PPS checks and parsing --- */
@@ -143,19 +144,47 @@ int parse_sim_carrier(const char *buf, char *mcc, size_t mcc_len, char *mnc, siz
     return 0;
 }
 
+/* Hash of the ICCID attribute, 0 when there is none. The ICCID is personal data: only the
+   hash leaves this function. */
+unsigned long sim_id_from(const char *buf)
+{
+    const char *p = buf;
+    unsigned long h = 5381;
+
+    while (p && strncmp(p, "iccid:", 6) != 0)
+    {
+        p = strchr(p, '\n');
+        if (p)
+            p++;
+    }
+    if (!p)
+        return 0;
+
+    /* name:type:value, the type may be empty */
+    p += 6 + strcspn(p + 6, ":\n");
+    if (*p++ != ':' || *p == '\0' || *p == '\n' || *p == '\r')
+        return 0;
+
+    for (; *p && *p != '\n' && *p != '\r'; p++)
+        h = h * 33 + (unsigned char)*p;
+    h &= 0xffffffffUL;
+    return h ? h : 1;
+}
+
 static int detect_sim_carrier(void)
 {
-    char buf[2048];
+    char buf[8192]; /* about 20 attributes, some long: iccid must not fall off the end */
     if (read_file(PPS_UICC_PATH, buf, sizeof(buf)) < 0)
         return 0;
 
+    g_sim_id = sim_id_from(buf);
     return parse_sim_carrier(buf, g_mcc, sizeof(g_mcc), g_mnc, sizeof(g_mnc), g_gid1, sizeof(g_gid1));
 }
 
 /* Polled by the monitor: a SIM from another carrier needs the startup path again. */
 int sim_carrier_changed(void)
 {
-    char buf[2048];
+    char buf[8192];
     char mcc[sizeof(g_mcc)], mnc[sizeof(g_mnc)], gid1[sizeof(g_gid1)];
 
     if (read_file(PPS_UICC_PATH, buf, sizeof(buf)) < 0 ||
@@ -164,7 +193,17 @@ int sim_carrier_changed(void)
         return 0;
 
     if (strcmp(mcc, g_mcc) == 0 && strcmp(mnc, g_mnc) == 0 && strcmp(gid1, g_gid1) == 0)
+    {
+        /* Same carrier, but another contract may allow what the old SIM was refused. */
+        unsigned long id = sim_id_from(buf);
+
+        if (id && g_sim_id && id != g_sim_id)
+        {
+            log_msg("[BBE] SIM_CHANGED: new SIM, same carrier");
+            return 1;
+        }
         return 0;
+    }
 
     log_msg("[BBE] SIM_CHANGED: mcc=%s mnc=%s (was %s %s)", mcc, mnc, g_mcc, g_mnc);
     return 1;

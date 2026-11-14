@@ -93,6 +93,32 @@ int main(void)
     g_status = "uicc_state:json:{\"state\":\"READY\"}\n";
     assert(!sim_carrier_changed());
 
+    /* The ICCID is only ever kept as a hash. */
+    const char *a = "gid1::eeff\niccid::8949000000000000001\nimsi_hplmn:json:{\"mcc\":\"234\",\"mnc\":\"30\"}\n";
+    const char *b = "gid1::eeff\niccid::8949000000000000002\nimsi_hplmn:json:{\"mcc\":\"234\",\"mnc\":\"30\"}\n";
+    assert(sim_id_from(a) != 0 && sim_id_from(a) == sim_id_from(a));
+    assert(sim_id_from(a) != sim_id_from(b));
+    assert(sim_id_from("iccid:str:8949000000000000001\r\n") == sim_id_from(a));
+    assert(sim_id_from("gid1::eeff\n") == 0);
+    assert(sim_id_from("iccid::\ngid1::eeff\n") == 0);
+    assert(sim_id_from("xiccid::8949000000000000001\n") == 0);
+
+    /* Same MCC/MNC/GID1, another SIM: the restart path runs again. */
+    const char *ready = "uicc_state:json:{\"state\":\"READY\"}\n";
+    char status_a[512], status_b[512];
+    snprintf(status_a, sizeof(status_a), "%s%s", a, ready);
+    snprintf(status_b, sizeof(status_b), "%s%s", b, ready);
+    g_status = status_a;
+    assert(detect_sim_carrier() == 1 && g_sim_id == sim_id_from(a));
+    g_logged = 0;
+    assert(!sim_carrier_changed() && g_logged == 0);
+    g_status = status_b;
+    assert(sim_carrier_changed() && g_logged == 1);
+
+    /* No ICCID on either side: nothing to compare. */
+    g_status = sim;
+    assert(!sim_carrier_changed());
+
     printf("test_sim_carrier: OK\n");
     return 0;
 }

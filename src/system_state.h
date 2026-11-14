@@ -19,6 +19,7 @@ typedef struct
 extern char g_mcc[4];
 extern char g_mnc[4];
 extern char g_gid1[41];
+extern unsigned long g_sim_id; /* 32-bit hash of the SIM's ICCID, 0 unknown; the ICCID itself is never stored */
 extern system_state_t g_current_state;
 
 int pps_check_attribute_contains(const char *pps_path, const char *attr_name, const char *expected_val);
@@ -27,6 +28,7 @@ int is_state_ready(const system_state_t *st);
 void log_state_transition(system_state_t old_st, system_state_t new_st);
 int incoming_ready_pps(void);
 int parse_sim_carrier(const char *buf, char *mcc, size_t mcc_len, char *mnc, size_t mnc_len, char *gid1, size_t gid1_len);
+unsigned long sim_id_from(const char *buf);
 int sim_carrier_changed(void);
 void ready_check(void);
 void wait_until_ready(void);

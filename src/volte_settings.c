@@ -35,6 +35,7 @@ static char g_selection[8] = "auto";     /* "auto", "manual" or "off" (VoLTE tur
 static char g_failed[4];                 /* letters of modes refused while automatic */
 static char g_auto_state[12] = "testing"; /* "testing", "confirmed", "off" */
 static char g_auto_note[160];            /* last automatic event, memory only */
+static unsigned long g_off_sim;          /* hash of the SIM VoLTE was turned off with, 0 unknown */
 static unsigned long g_last_call_id;     /* last outgoing call already evaluated */
 static volatile int g_phone_changed;
 static int g_carrier_id = -1;
@@ -101,7 +102,7 @@ static int write_kv(const char *path, int id, const char *value)
 
 /* --- automatic selection state, <carrier_id> <token> in dial-auto ---
    Tokens: manual | forced (VoLTE turned off by the user) | ok (confirmed) |
-   off (VoLTE off, once "done") | auto | auto-<failed letters> (testing). */
+   off or off-<SIM hash> (VoLTE off, once "done") | auto | auto-<failed letters> (testing). */
 
 static void save_auto(void)
 {
@@ -115,6 +116,8 @@ static void save_auto(void)
         snprintf(tok, sizeof(tok), "manual");
     else if (strcmp(g_auto_state, "confirmed") == 0)
         snprintf(tok, sizeof(tok), "ok");
+    else if (strcmp(g_auto_state, "off") == 0 && g_off_sim)
+        snprintf(tok, sizeof(tok), "off-%08lx", g_off_sim);
     else if (strcmp(g_auto_state, "off") == 0)
         snprintf(tok, sizeof(tok), "off");
     else if (g_failed[0])
@@ -131,6 +134,7 @@ static void load_auto(const char *tok)
     snprintf(g_selection, sizeof(g_selection), "auto");
     snprintf(g_auto_state, sizeof(g_auto_state), "testing");
     g_failed[0] = '\0';
+    g_off_sim = 0;
 
     if (strcmp(tok, "manual") == 0)
         snprintf(g_selection, sizeof(g_selection), "manual");
@@ -140,6 +144,11 @@ static void load_auto(const char *tok)
         snprintf(g_auto_state, sizeof(g_auto_state), "confirmed");
     else if (strcmp(tok, "off") == 0 || strcmp(tok, "done") == 0)
         snprintf(g_auto_state, sizeof(g_auto_state), "off");
+    else if (strncmp(tok, "off-", 4) == 0)
+    {
+        snprintf(g_auto_state, sizeof(g_auto_state), "off");
+        g_off_sim = strtoul(tok + 4, NULL, 16);
+    }
     else if (strncmp(tok, "auto-", 5) == 0)
         snprintf(g_failed, sizeof(g_failed), "%s", tok + 5);
 }
@@ -293,6 +302,25 @@ void volte_settings_init(void)
         tok[0] = '\0';
         read_kv(path, g_carrier_id, tok, sizeof(tok));
         load_auto(tok);
+
+        /* Another SIM of the same carrier may be on a contract that allows VoLTE. */
+        if (g_sim_id && strcmp(g_selection, "auto") == 0 && strcmp(g_auto_state, "off") == 0)
+        {
+            if (g_off_sim == 0)
+            {
+                g_off_sim = g_sim_id;
+                save_auto();
+            }
+            else if (g_off_sim != g_sim_id)
+            {
+                g_failed[0] = '\0';
+                g_off_sim = 0;
+                snprintf(g_auto_state, sizeof(g_auto_state), "testing");
+                snprintf(g_auto_note, sizeof(g_auto_note), "New SIM: trying VoLTE again");
+                save_auto();
+                log_msg("[BBE] DIAL_AUTO: new SIM, VoLTE back on");
+            }
+        }
     }
 
     if (g_mode[0] == '\0')
@@ -438,6 +466,7 @@ static void auto_check_last_call(void)
         const char *first = volte_mode_from_letter(g_failed[0]);
 
         snprintf(g_auto_state, sizeof(g_auto_state), "off");
+        g_off_sim = g_sim_id;
         snprintf(g_auto_note, sizeof(g_auto_note),
                  "Network refused every dial format; VoLTE is off on this network and calls use 3G or 2G");
         save_auto();

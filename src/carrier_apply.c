@@ -238,12 +238,14 @@ int refresh_carrier_db(int force)
     snprintf(stock, sizeof(stock), "%s/" CARRIER_STOCK_NAME, g_data_path);
     snprintf(apns, sizeof(apns), "%s/" CARRIER_APNS_NAME, g_data_path);
 
-    /* An update can write different APNs from the same download, so it doesn't wait out the old list. */
-    char bin[600];
-    struct stat bin_st;
-    snprintf(bin, sizeof(bin), "%s/ims_manager", g_init_path);
+    /* The stamp says which version of the list code wrote the list. An update that writes
+       different APNs from the same download bumps it, so it doesn't wait out the old list.
+       An install from before the stamp has none and downloads once. */
+    char gen_path[600], gen[16] = "";
+    snprintf(gen_path, sizeof(gen_path), "%s/" CARRIER_GEN_NAME, g_data_path);
+    read_file(gen_path, gen, sizeof(gen));
     if (!force && stat(db, &st) == 0 && time(NULL) - st.st_mtime < CARRIER_DB_MAX_AGE_SECONDS &&
-        !(stat(bin, &bin_st) == 0 && bin_st.st_mtime > st.st_mtime))
+        strcmp(gen, CARRIER_LIST_GEN) == 0)
         return 0;
 
     if (!path_linked_to(CARRIER_IDS_PATH, db) && ims_carrier_db_save_stock(CARRIER_IDS_PATH, stock) != 0)
@@ -259,6 +261,7 @@ int refresh_carrier_db(int force)
     }
 
     log_msg("[BBE] CARRIER_DB_UPDATED");
+    write_file(gen_path, CARRIER_LIST_GEN, 0644);
     g_built_carrier_id = -1;
     link_carrier_db();
     return 1;

@@ -58,11 +58,34 @@ void log_msg(const char *fmt, ...)
     va_end(args);
 }
 
+/* The list stamp is the one file these tests keep on disk. */
 int read_file(const char *path, char *buf, size_t max_len)
 {
+    if (strstr(path, CARRIER_GEN_NAME))
+    {
+        FILE *f = fopen(path, "r");
+        size_t n = f ? fread(buf, 1, max_len - 1, f) : 0;
+        if (f)
+            fclose(f);
+        if (n == 0)
+            return -1;
+        buf[n] = '\0';
+        return (int)n;
+    }
     if (strcmp(path, PPS_DATA_PATH) == 0)
         return snprintf(buf, max_len, "cdsc_xml::%s\n", g_override);
     return snprintf(buf, max_len, "%s", g_home);
+}
+
+int write_file(const char *path, const char *content, mode_t mode)
+{
+    (void)mode;
+    FILE *f = fopen(path, "w");
+    if (!f)
+        return -1;
+    fputs(content, f);
+    fclose(f);
+    return 0;
 }
 
 /* Behaves as seen on the phone: cellular-control reloads when the override changes. */
@@ -178,27 +201,28 @@ int main(void)
     assert(g_sleeps <= CARRIER_RELOAD_WAIT_SECONDS);
     assert(strcmp(g_last_log, "[BBE] CARRIER_RELOAD_TIMEOUT") == 0);
 
-    /* A fresh list waits its month, unless the installed binary is newer than it. */
-    char dir[] = "/tmp/reload-test-XXXXXX", db[600], bin[600];
+    /* A fresh list waits its month, unless its stamp isn't this build's. */
+    char dir[] = "/tmp/reload-test-XXXXXX", db[600], gen[600], buf[16] = "";
     assert(mkdtemp(dir));
     snprintf(g_data_path, sizeof(g_data_path), "%s", dir);
-    snprintf(g_init_path, sizeof(g_init_path), "%s", dir);
     snprintf(db, sizeof(db), "%s/" CARRIER_DB_NAME, dir);
-    snprintf(bin, sizeof(bin), "%s/ims_manager", dir);
+    snprintf(gen, sizeof(gen), "%s/" CARRIER_GEN_NAME, dir);
     fclose(fopen(db, "w"));
-    fclose(fopen(bin, "w"));
-    struct timeval older[2] = {{time(NULL) - 60, 0}, {time(NULL) - 60, 0}};
-    assert(utimes(bin, older) == 0);
+    assert(write_file(gen, CARRIER_LIST_GEN, 0644) == 0);
     g_last_log[0] = '\0';
     assert(refresh_carrier_db(0) == 0);
     assert(g_last_log[0] == '\0');
     assert(carrier_db_present() == 1);
-    assert(utimes(db, older) == 0 && utimes(bin, NULL) == 0);
     /* 1: it downloaded a new list, which is what makes the app's buttons restart the daemon. */
+    assert(write_file(gen, "0", 0644) == 0);
     assert(refresh_carrier_db(0) == 1);
     assert(strcmp(g_last_log, "[BBE] CARRIER_DB_UPDATED") == 0 || strcmp(g_last_log, "[BBE] CARRIER_DB_LINKED") == 0);
+    assert(read_file(gen, buf, sizeof(buf)) > 0 && strcmp(buf, CARRIER_LIST_GEN) == 0);
+    /* A list from before the stamp existed has none. */
+    remove(gen);
+    assert(refresh_carrier_db(0) == 1);
+    remove(gen);
     remove(db);
-    remove(bin);
     rmdir(dir);
 
     puts("carrier reload tests passed");

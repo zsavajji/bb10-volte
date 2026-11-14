@@ -9,6 +9,12 @@
 #define CARRIER_STOCK_NAME "carrierIds.stock.xml"
 #define CARRIER_APNS_NAME  "carrier-apns.tsv"
 
+/* Bump CARRIER_LIST_GEN when carrier_rows.c or carrier_apns.c would write a different list or APN
+   table from the same download; the next start then downloads again instead of waiting out the
+   30 days. */
+#define CARRIER_GEN_NAME   "carrier-list.gen"
+#define CARRIER_LIST_GEN   "1"
+
 /* New carriers get this plus their AOSP canonical_id, so IDs survive a refresh. */
 #define AOSP_ID_BASE 30000
 

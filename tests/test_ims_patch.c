@@ -48,6 +48,7 @@ static void check_buffer(void)
     unsigned char *buf = calloc(1, SIZE);
 
     g_ims_patch_home_domain = 1;
+    g_ims_patch_rtcp_bw = 1;
     unsigned char *copy = calloc(1, SIZE);
 
     assert(buf && copy);
@@ -187,6 +188,7 @@ static void check_home_toggle(void)
 
     /* Off: the home-domain site and the retired ones are stock, the four old patches stay. */
     g_ims_patch_home_domain = 0;
+    g_ims_patch_rtcp_bw = 0;
     assert(ims_patch_buffer(buf, SIZE) == 1);
     for (size_t i = 0; i < COUNT; i++)
         assert(memcmp(buf + patches[i].off,
@@ -196,11 +198,37 @@ static void check_home_toggle(void)
     assert(ims_patch_buffer(buf, SIZE) == 0);
 
     g_ims_patch_home_domain = 1;
+    g_ims_patch_rtcp_bw = 1;
     assert(ims_patch_buffer(buf, SIZE) == 1);
     for (size_t i = 0; i < COUNT; i++)
         assert(memcmp(buf + patches[i].off,
                       patches[i].use == PATCH_RETIRED ? patches[i].from : patches[i].to, 2) == 0);
     assert(memcmp(buf + 0x8d176, "\x02\x0e", 2) == 0);
+    assert(memcmp(buf + 0x1d9c1c, "\xef\x15", 2) == 0);
+    assert(memcmp(buf + 0x1d9b16, "\x00\xbf", 2) == 0);
+
+    free(buf);
+}
+
+static void check_rtcp_toggle(void)
+{
+    unsigned char *buf = calloc(1, SIZE);
+
+    assert(buf);
+    for (size_t i = 0; i < COUNT; i++)
+        put(buf, i, 0);
+
+    g_ims_patch_home_domain = 0;
+    g_ims_patch_rtcp_bw = 1;
+    assert(ims_patch_buffer(buf, SIZE) == 1);
+    assert(memcmp(buf + 0x1d9c1c, "\xef\x15", 2) == 0);
+    assert(memcmp(buf + 0x1d9b16, "\x00\xbf", 2) == 0);
+
+    g_ims_patch_rtcp_bw = 0;
+    assert(ims_patch_buffer(buf, SIZE) == 1);
+    assert(memcmp(buf + 0x1d9c1c, "\xe7\x15", 2) == 0);
+    assert(memcmp(buf + 0x1d9b16, "\x55\xdd", 2) == 0);
+    assert(memcmp(buf + 0x24c6d8, "\x01\x21", 2) == 0);
 
     free(buf);
 }
@@ -209,6 +237,7 @@ int main(void)
 {
     check_buffer();
     check_home_toggle();
+    check_rtcp_toggle();
     check_real_binary();
     printf("test_ims_patch: OK\n");
     return 0;

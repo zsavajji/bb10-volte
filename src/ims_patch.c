@@ -17,10 +17,14 @@
    With this off it is reverted to the stock bytes. */
 int g_ims_patch_home_domain = 0;
 
+/* The RTCP-bandwidth site is only wanted for carriers that ship data/rtcp-bw-<id>; otherwise it is reverted to the stock bytes. */
+int g_ims_patch_rtcp_bw = 0;
+
 enum
 {
     PATCH_ALWAYS,
     PATCH_HOME,   /* only with g_ims_patch_home_domain */
+    PATCH_RTCP,   /* only with g_ims_patch_rtcp_bw */
     PATCH_RETIRED /* shipped by 2.34-2.37, now always reverted to stock */
 };
 
@@ -48,6 +52,19 @@ static const patch_t patches[] = {
        `movs r1, #0` becomes `movs r1, #1`: the default for AMR-WB, then AMR. */
     {0x24c6d8, {0x00, 0x21}, {0x01, 0x21}, PATCH_ALWAYS},
     {0x24c700, {0x00, 0x21}, {0x01, 0x21}, PATCH_ALWAYS},
+    /* SDP b=RR/b=RS. Every SDP says b=RS:0 b=RR:0 (RTCP off); Telekom DE ends calls with
+       503 (1:223) as soon as it sees our SDP, and its own offers carry b=RS:600 b=RR:2000.
+       calcRtcpBandwidth (0x1d9ac8) first checks the RTCP period at this+0x608 and writes
+       RR = RS = 0 when it is <= 0. The period is getInt("MediaDialog.PeriodSR", 1000) only if
+       the media check at vtable +0x120 (0x1db26c) passes, else 0, and on these calls it is 0.
+       `ble` becomes `nop`, so the scheme-3GPP formula always runs: RR = 3.75% and RS = 1.25%
+       of AudioBandwidth * 1000. The non-3GPP branch divides by the period, so this stays
+       per carrier (data/rtcp-bw-<id>), on carriers known to use scheme 3GPP. */
+    {0x1d9b16, {0x55, 0xdd}, {0x00, 0xbf}, PATCH_RTCP},
+    /* The formula reads "Updated.MediaDialog.AudioBandwidth", 0 at offer time. The literal
+       read at 0x1d9b6e is moved 8 bytes on, to the string's own suffix
+       "MediaDialog.AudioBandwidth" (41 from startup), giving b=RR:1537 b=RS:512. */
+    {0x1d9c1c, {0xe7, 0x15}, {0xef, 0x15}, PATCH_RTCP},
     /* Per-carrier home domain. The setter (0x8d0ea) keeps the domain in the base slot +0x300
        with its source; while that source is 9 (IMSI/IMPU-derived) or 2 (@ims
        Home_network_domain_name), it only accepts a new value from source 7 or 9, so the
@@ -68,7 +85,8 @@ static const patch_t patches[] = {
 static int patch_wanted(size_t i)
 {
     return patches[i].use == PATCH_ALWAYS ||
-           (patches[i].use == PATCH_HOME && g_ims_patch_home_domain);
+           (patches[i].use == PATCH_HOME && g_ims_patch_home_domain) ||
+           (patches[i].use == PATCH_RTCP && g_ims_patch_rtcp_bw);
 }
 
 /* A site may already hold its patched bytes, since other addons copy and stack on our copy.

@@ -53,6 +53,7 @@ typedef struct
 
 static const knob_t g_knobs[] = {
     {"force-ims-voice", 0}, /* keep the VoPS bit set while IMS is registered (voice_flag.c) */
+    {"rtcp-bw", 1},         /* non-zero SDP b=RS/b=RR, ims_patch.c PATCH_RTCP */
 };
 #define KNOB_COUNT (sizeof(g_knobs) / sizeof(g_knobs[0]))
 
@@ -421,6 +422,13 @@ void volte_settings_init(void)
 
     g_ims_patch_home_domain = strcmp(g_mode, "sip-learned") == 0;
 
+    /* Test for Telekom DE's 503 (1:223): data/rtcp-bw-<id> turns on the ims_patch.c site that
+       gives our SDP non-zero b=RS/b=RR, as Telekom's own offers have. Set here, not with the DCA
+       configs, because every start path runs this before ims_rrm starts. */
+    g_ims_patch_rtcp_bw = knob_on(knob_find("rtcp-bw"));
+    if (g_ims_patch_rtcp_bw)
+        log_msg("[BBE] RTCP_BW: patch on for carrier %d", g_carrier_id);
+
     /* A request left from before this start was already handled (or is stale, like a debug
        run): only a newer one, written while the daemon runs, counts. */
     {
@@ -589,6 +597,13 @@ static void apply_knob(char *spec)
         write_status("idle", "No change");
         return;
     }
+    /* Checked before anything changes: the flag also decides how ims_rrm is patched. */
+    if (strcmp(k->name, "rtcp-bw") == 0 && call_active())
+    {
+        write_status("error", "A call is in progress; try again");
+        return;
+    }
+
     if ((on ? write_file(path, "on\n", 0644) : unlink(path)) != 0)
     {
         write_status("error", "Could not save the setting");
@@ -603,6 +618,20 @@ static void apply_knob(char *spec)
         write_status("idle", on ? "Saved" : "Saved; the phone drops the flag at its next network update");
         return;
     }
+
+    /* rtcp-bw: ims_rrm_binary() patches ims_rrm on each start from this flag. */
+    g_ims_patch_rtcp_bw = on;
+    if (volte_settings_voice_off())
+    {
+        write_status("idle", "Saved; applies when VoLTE is on");
+        return;
+    }
+    write_status("applying", "Restarting IMS...");
+    ims_reconnect_reset_radio_budget();
+    int ok = reconnect_ims_with_backoff();
+    if (!ok && volte_settings_voice_off())
+        return;
+    write_status(ok ? "idle" : "error", ok ? "Saved; VoLTE restarted" : "IMS did not connect");
 }
 
 /* The dial format (g_mode) stays, so turning VoLTE back on returns to it. */

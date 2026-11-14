@@ -1,0 +1,5 @@
+@ir92
+UsePreconditions:b:true
+SMS_Format::3GPP
+amr_modeset_list::none
+amrwb_modeset_list::none

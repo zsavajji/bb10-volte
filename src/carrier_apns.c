@@ -319,6 +319,8 @@ int write_apns(const char *path, const row_list_t *rows, const row_list_t *aosp,
             fprintf(f, "%d\t%s", row->id, name);
             write_apn_fields(f, apns, count, internet, "default");
             write_apn_fields(f, apns, count, mms, "mms");
+            /* Last column, so a file written before it existed still parses. The name check keeps tabs and newlines out. */
+            fprintf(f, "\t%s", internet && internet->protocol && valid_apn_name(internet->protocol) ? internet->protocol : "");
             fputc('\n', f);
         }
         status = fclose(f) == 0 ? 0 : -1;

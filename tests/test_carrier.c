@@ -57,6 +57,7 @@ static const char k_apns[] =
     "<apn carrier=\"Host\" mcc=\"222\" mnc=\"99\" apn=\"host.net\" type=\"default\"/>"
     "<apn carrier=\"Plan 1\" carrier_id=\"3011\" mcc=\"222\" mnc=\"75\" apn=\"web1\" type=\"default,ia,supl\"/>"
     "<apn carrier=\"Plan 2\" carrier_id=\"3011\" mcc=\"222\" mnc=\"75\" apn=\"web2\" type=\"default,ia,supl\"/>"
+    "<apn carrier=\"Dual\" carrier_id=\"3020\" mcc=\"222\" mnc=\"76\" apn=\"internet.v6\" protocol=\"IPV4V6\" type=\"default\"/>"
     "</apns>";
 
 static const char k_default_config[] =
@@ -95,6 +96,23 @@ static const char k_config_real_ims[] = CONFIG_HEAD
     "<ServiceConfiguration><Name>ims</Name><RadioAccessTechnology><APN>carrier-ims</APN></RadioAccessTechnology>"
     "<IMSConfiguration><RequestPCSCFViaPCO>true</RequestPCSCFViaPCO></IMSConfiguration></ServiceConfiguration>"
     CONFIG_TAIL;
+
+/* As Telekom DE ships: the internet service asks for IPv4 only. */
+#define IPV4_INTERNET \
+    "<ServiceConfiguration><Name>internet</Name>" \
+    "<NetworkInterfaceConfiguration><IPConfiguration><Type>IPv4</Type></IPConfiguration></NetworkInterfaceConfiguration>" \
+    "<BearerManagementTimer/><RadioAccessTechnology><APN>stock.net</APN></RadioAccessTechnology></ServiceConfiguration>"
+
+/* Whether the internet service, not the ims one after it, has this IP type. */
+static int internet_type_is(const char *xml, const char *type)
+{
+    char tag[64];
+    snprintf(tag, sizeof(tag), "<Type>%s</Type>", type);
+    const char *service = strstr(xml, "<Name>internet</Name>");
+    const char *end = service ? strstr(service, "</ServiceConfiguration>") : NULL;
+    const char *found = end ? strstr(service, tag) : NULL;
+    return found && found < end;
+}
 
 static void write_text(const char *path, const char *text)
 {
@@ -138,6 +156,8 @@ static char *build_textpb(void)
         "  carrier_attribute {\n    mccmnc_tuple: \"22294\"\n  }\n}\n"
         "carrier_id {\n  canonical_id: 3011\n  carrier_name: \"Two Plans\"\n"
         "  carrier_attribute {\n    mccmnc_tuple: \"22275\"\n  }\n}\n"
+        "carrier_id {\n  canonical_id: 3020\n  carrier_name: \"Dual Stack\"\n"
+        "  carrier_attribute {\n    mccmnc_tuple: \"22276\"\n  }\n}\n"
         "carrier_id {\n  canonical_id: 3010\n  carrier_name: \"Own APN Unusable\"\n"
         "  carrier_attribute {\n    mccmnc_tuple: \"22271\"\n  }\n}\n"
         "carrier_id {\n  canonical_id: 3005\n  carrier_name: \"GID on Stock Network\"\n"
@@ -350,6 +370,34 @@ int main(void)
         CONFIG_TAIL);
     assert(ims_build_carrier_xml(48, "config", "apns.tsv", "locked.xml") == 0);
     assert(strstr(read_text("locked.xml"), "<AppModifiable>true</AppModifiable>"));
+
+    /* Android asks for IPv4v6 on this APN, so the internet service must too, even where stock has no type. */
+    assert(ims_build_carrier_xml(AOSP_ID_BASE + 3020, "config", "apns.tsv", "dual.xml") == 0);
+    assert(internet_type_is(read_text("dual.xml"), "IPv4v6"));
+    assert(strstr(read_text("dual.xml"), "<NetworkInterfaceConfiguration>") < strstr(read_text("dual.xml"), "<RadioAccessTechnology>"));
+
+    /*
+     * Only IPV4V6 with a different APN name changes stock's IPv4. IP does not, nor does a file from
+     * before the column, a stock APN that stays, or a pick that only respells the stock name.
+     */
+    write_text("proto.tsv",
+        "90\tx\tdual.net\t\t\t\t\t\tIPV4V6\n"
+        "91\tx\tsingle.net\t\t\t\t\t\tIP\n"
+        "92\tx\told.net\t\t\t\t\t\n"
+        "93\tx\tdual.net,stock.net\t\t\t\t\t\tIPV4V6\n"
+        "94\tx\tStock.Net\t\t\t\t\t\tIPV4V6\n");
+    for (int id = 90; id <= 94; id++)
+    {
+        char path[64], out[64];
+        snprintf(path, sizeof(path), "config/%d.xml", id);
+        snprintf(out, sizeof(out), "proto-%d.xml", id);
+        write_text(path, CONFIG_HEAD IPV4_INTERNET CONFIG_TAIL);
+        assert(ims_build_carrier_xml(id, "config", "proto.tsv", out) == 0);
+
+        const char *xml = read_text(out);
+        assert(internet_type_is(xml, "IPv4v6") == (id == 90));
+        assert(internet_type_is(xml, "IPv4") == (id != 90));
+    }
 
     /* A real IMS service stays exactly as shipped. */
     assert(ims_build_carrier_xml(50, "config", "apns.tsv", "real.xml") == 0);

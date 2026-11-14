@@ -57,6 +57,7 @@ typedef struct
     char mms_apn[256];
     char mms_user[128];
     char mms_password[128];
+    char protocol[16];
 } carrier_apns_t;
 
 static xmlNodePtr find_child(xmlNodePtr parent, const char *name)
@@ -180,8 +181,9 @@ static void set_service_apn(xmlDocPtr doc, xmlNodePtr service, const char *apn, 
 /*
  * list is the Android pick, then any other APNs Android has for the carrier. A stock APN among them is
  * BlackBerry's choice of the same plans, so it stays with its login; otherwise the pick replaces it.
+ * Returns 0 when nothing was set, 1 when the pick was set under the stock name, 2 when the name differs.
  */
-static void set_listed_apn(xmlDocPtr doc, xmlNodePtr service, const char *list, const char *user, const char *password)
+static int set_listed_apn(xmlDocPtr doc, xmlNodePtr service, const char *list, const char *user, const char *password)
 {
     xmlNodePtr rat = service ? find_child(service, "RadioAccessTechnology") : NULL;
     xmlNodePtr apn_node = rat ? find_child(rat, "APN") : NULL;
@@ -191,8 +193,9 @@ static void set_listed_apn(xmlDocPtr doc, xmlNodePtr service, const char *list, 
     snprintf(first, sizeof(first), "%.*s", (int)strcspn(list, ","), list);
 
     /* Stock equal to the pick still takes the pick, with Android's login and spelling. */
+    int renamed = !stock || strcasecmp(first, (const char *)stock) != 0;
     int keep = 0;
-    if (stock_len && strcasecmp(first, (const char *)stock) != 0)
+    if (stock_len && renamed)
     {
         for (const char *p = list + strcspn(list, ","); *p && !keep; p += strcspn(p, ","))
         {
@@ -202,8 +205,32 @@ static void set_listed_apn(xmlDocPtr doc, xmlNodePtr service, const char *list, 
     }
     xmlFree(stock);
 
-    if (!keep)
+    int set = !keep && apn_node;
+    if (set)
         set_service_apn(doc, service, first, user, password);
+    return set ? 1 + renamed : 0;
+}
+
+static void set_ip_type(xmlDocPtr doc, xmlNodePtr service, const char *type)
+{
+    xmlNodePtr nic = find_child(service, "NetworkInterfaceConfiguration");
+    if (!nic)
+    {
+        /* Stock configs keep it ahead of the bearer and radio settings. */
+        xmlNodePtr before = find_child(service, "BearerManagementTimer");
+        before = before ? before : find_child(service, "RadioAccessTechnology");
+        nic = xmlNewNode(service->ns, (const xmlChar *)"NetworkInterfaceConfiguration");
+        if (before)
+            xmlAddPrevSibling(before, nic);
+        else
+            xmlAddChild(service, nic);
+    }
+
+    xmlNodePtr ip = find_child(nic, "IPConfiguration");
+    ip = ip ? ip : xmlNewChild(nic, nic->ns, (const xmlChar *)"IPConfiguration", NULL);
+    xmlNodePtr node = find_child(ip, "Type");
+    node = node ? node : xmlNewChild(ip, ip->ns, (const xmlChar *)"Type", NULL);
+    set_text(doc, node, type);
 }
 
 /* Adds a setting where stock configs keep it: after the first of these that the service has. */
@@ -357,7 +384,8 @@ static int load_carrier_apns(const char *path, int carrier_id, carrier_apns_t *o
         field = next_tsv_field(field, out->password, sizeof(out->password));
         field = next_tsv_field(field, out->mms_apn, sizeof(out->mms_apn));
         field = next_tsv_field(field, out->mms_user, sizeof(out->mms_user));
-        next_tsv_field(field, out->mms_password, sizeof(out->mms_password));
+        field = next_tsv_field(field, out->mms_password, sizeof(out->mms_password));
+        next_tsv_field(field, out->protocol, sizeof(out->protocol));
         found = 1;
     }
 
@@ -371,8 +399,16 @@ static void apply_carrier_apns(xmlDocPtr doc, xmlNodePtr data, xmlDocPtr templat
     if (name && apns->name[0] != '\0')
         set_text(doc, name, apns->name);
 
-    if (apns->apn[0] != '\0')
-        set_listed_apn(doc, find_named(data, "ServiceConfiguration", "internet"), apns->apn, apns->user, apns->password);
+    /*
+     * Android requests this APN dual-stack. Telekom DE's internet.v6.telekom rejects an IPv4-only
+     * request (net down reason 0x60020 on every attempt, so the phone had no mobile data). The stock
+     * type was written for the stock APN, so it is only suspect when a different APN name replaces
+     * it; a kept or same-named stock APN keeps its type (EE and Telus work on stock IPv4).
+     */
+    xmlNodePtr internet = find_named(data, "ServiceConfiguration", "internet");
+    if (apns->apn[0] != '\0' && set_listed_apn(doc, internet, apns->apn, apns->user, apns->password) == 2 &&
+        strcasecmp(apns->protocol, "IPV4V6") == 0)
+        set_ip_type(doc, internet, "IPv4v6");
 
     if (apns->mms_apn[0] != '\0')
     {

@@ -76,6 +76,28 @@ int run_cmd_spawn(char *const argv[], const char *log_path)
     return (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? 0 : -1;
 }
 
+/* 1 when the process's executable path contains name, or equals it with strict. */
+static int exe_matches(int pid, const char *name, int strict)
+{
+    char path[PATH_MAX];
+    char exe_path[PATH_MAX];
+
+    snprintf(path, sizeof(path), "/proc/%d/exefile", pid);
+
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return 0;
+
+    ssize_t n = read(fd, exe_path, sizeof(exe_path) - 1);
+    close(fd);
+    if (n <= 0)
+        return 0;
+
+    exe_path[n] = '\0';
+    exe_path[strcspn(exe_path, "\n")] = '\0';
+    return strict ? strcmp(exe_path, name) == 0 : strstr(exe_path, name) != NULL;
+}
+
 int find_pid_by_name(const char *name, int strict)
 {
     if (!name)
@@ -91,45 +113,10 @@ int find_pid_by_name(const char *name, int strict)
     while ((ent = readdir(d)))
     {
         int pid = atoi(ent->d_name);
-        if (pid <= 0)
-            continue;
-
-        char path[PATH_MAX];
-        char exe_path[PATH_MAX];
-
-        snprintf(path, sizeof(path), "/proc/%d/exefile", pid);
-
-        int fd = open(path, O_RDONLY | O_CLOEXEC);
-        if (fd >= 0)
+        if (pid > 0 && exe_matches(pid, name, strict))
         {
-            ssize_t n = read(fd, exe_path, sizeof(exe_path) - 1);
-            close(fd);
-
-            if (n > 0)
-            {
-                exe_path[n] = '\0';
-
-                char *newline = strchr(exe_path, '\n');
-                if (newline)
-                    *newline = '\0';
-
-                if (strict)
-                {
-                    if (strcmp(exe_path, name) == 0)
-                    {
-                        found_pid = pid;
-                        break;
-                    }
-                }
-                else
-                {
-                    if (strstr(exe_path, name) != NULL)
-                    {
-                        found_pid = pid;
-                        break;
-                    }
-                }
-            }
+            found_pid = pid;
+            break;
         }
     }
     closedir(d);
@@ -190,7 +177,10 @@ void exe_name_signal_safe(pid_t pid, char *out, size_t size)
     read_line_signal_safe(path, out, size);
 }
 
-int slay_by_cmdline_graceful(const char *search_str, int timeout_ms)
+/* Matches like find_pid_by_name(name, 0): a command line also names ims_rrm in a tester's
+   `slog2info -b ims_rrm`. Returns how many processes were stopped, 0 when none is running,
+   -1 on error. */
+int slay_by_name_graceful(const char *search_str, int timeout_ms)
 {
     if (!search_str || strlen(search_str) == 0)
         return -1;
@@ -219,51 +209,30 @@ int slay_by_cmdline_graceful(const char *search_str, int timeout_ms)
         if (pid <= 0 || pid == (int)self_pid)
             continue;
 
-        char path[PATH_MAX];
-        snprintf(path, sizeof(path), "/proc/%d/cmdline", pid);
+        if (!exe_matches(pid, search_str, 0))
+            continue;
 
-        int fd = open(path, O_RDONLY | O_CLOEXEC);
-        if (fd >= 0)
+        if (pid_count >= capacity)
         {
-            char cmdline[2048];
-            ssize_t n = read(fd, cmdline, sizeof(cmdline) - 1);
-            close(fd);
-
-            if (n > 0)
+            size_t new_capacity = capacity * 2;
+            pid_t *new_pids = realloc(pids, new_capacity * sizeof(pid_t));
+            if (!new_pids)
             {
-                for (ssize_t i = 0; i < n - 1; i++)
-                {
-                    if (cmdline[i] == '\0')
-                        cmdline[i] = ' ';
-                }
-                cmdline[n] = '\0';
-
-                if (strstr(cmdline, search_str) != NULL)
-                {
-                    if (pid_count >= capacity)
-                    {
-                        size_t new_capacity = capacity * 2;
-                        pid_t *new_pids = realloc(pids, new_capacity * sizeof(pid_t));
-                        if (!new_pids)
-                        {
-                            log_msg("Memory reallocation failed, processing partial list (%zu processes)", pid_count);
-                            break;
-                        }
-                        pids = new_pids;
-                        capacity = new_capacity;
-                    }
-                    pids[pid_count++] = (pid_t)pid;
-                }
+                log_msg("Memory reallocation failed, processing partial list (%zu processes)", pid_count);
+                break;
             }
+            pids = new_pids;
+            capacity = new_capacity;
         }
+        pids[pid_count++] = (pid_t)pid;
     }
     closedir(d);
 
+    /* Nothing to stop is not a failure: the caller wants it gone, and it is. */
     if (pid_count == 0)
     {
         free(pids);
-        log_msg("No active processes found matching cmdline pattern: %s", search_str);
-        return -1;
+        return 0;
     }
 
     /* Step 2: Send SIGTERM signal to all matched processes */
@@ -338,7 +307,7 @@ int slay_by_cmdline_graceful(const char *search_str, int timeout_ms)
     }
 
     free(pids);
-    return 0;
+    return (int)pid_count;
 }
 
 int run_cmd_capture(const char *cmd, char *out, size_t max_len)

@@ -40,14 +40,12 @@ void provider_enable(void)
 
 void stop_ims(void)
 {
-    if (find_pid_by_name("ims_rrm", 0) > 0)
-    {
-        if (slay_by_cmdline_graceful("ims_rrm", 15000) != 0)
-        {
-            bbe_exit_fail("IMS_STOP_FAILED", 1);
-        }
+    int stopped = slay_by_name_graceful("ims_rrm", 15000);
+
+    if (stopped < 0)
+        bbe_exit_fail("IMS_STOP_FAILED", 1);
+    if (stopped > 0)
         sleep(2);
-    }
 }
 
 void start_ims(void)

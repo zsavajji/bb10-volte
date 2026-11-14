@@ -7,6 +7,7 @@ ZIP       := zip
 SRC_DIR   := src
 PKG_DIR   := pkg/init
 ZIP_NAME  := volte.zip
+VERSION   := $(shell sed -n 's/^Package-Version: *//p' pkg/MANIFEST)
 
 # Output targets
 TARGET_BIN := $(PKG_DIR)/ims_manager
@@ -87,7 +88,16 @@ $(TARGET_SO): $(OBJS_SO) | $(PKG_DIR)
 package: $(TARGET_BIN) $(TARGET_SO)
 	cp $(TARGET_BIN) $(TARGET_BIN).new
 	cp volte-debug.sh pkg/data/volte-debug.sh
+	@# The installer prints each trusted path, so an empty init/version-<Package-Version> listed in
+	@# init/trusted puts the version on the install screen. start.sh deletes older ones.
+	rm -f $(PKG_DIR)/version-*
+	touch $(PKG_DIR)/version-$(VERSION)
+	grep -v '^version-' $(PKG_DIR)/trusted > $(PKG_DIR)/trusted.tmp
+	echo version-$(VERSION) >> $(PKG_DIR)/trusted.tmp
+	mv $(PKG_DIR)/trusted.tmp $(PKG_DIR)/trusted
 	@echo "[*] Creating archive $(ZIP_NAME)..."
+	@# zip -r only adds to an existing archive: start fresh so removed files do not linger.
+	@rm -f $(ZIP_NAME)
 	@cd pkg && $(ZIP) -r -q ../$(ZIP_NAME) ./*
 	@echo "[+] All done! Package created: $(ZIP_NAME)"
 

@@ -3,6 +3,12 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 BIN=$SCRIPT_DIR/ims_manager
 LOG=/var/log/installer.log
 
+# Only there so the installer prints the version (see the Makefile); older installs leave theirs.
+VER=$(sed -n 's/^Package-Version: *//p' "$SCRIPT_DIR/../MANIFEST")
+for f in "$SCRIPT_DIR"/version-*; do
+    [ "$f" = "$SCRIPT_DIR/version-$VER" ] || rm -f "$f"
+done
+
 daemon_pids() {
     pidin arg 2>/dev/null | grep '[i]ms_manager' | while read -r pid prog rest; do
         case $prog in ims_manager|*/ims_manager) echo "$pid" ;; esac

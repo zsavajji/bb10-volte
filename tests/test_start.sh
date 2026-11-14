@@ -45,6 +45,7 @@ start_daemon() {
 echo "--- update with the daemon running"
 reset
 start_daemon
+touch "$INIT/version-old" "$INIT/version-new"
 "$SH" "$INIT/start.sh"; rc=$?
 check "exits 0" '[ "$rc" = 0 ]'
 check "old daemon stopped" '! kill -0 "$(cat "$R/daemon.pid")" 2>/dev/null'
@@ -53,6 +54,8 @@ check ".new removed" '[ ! -e "$INIT/ims_manager.new" ]'
 check "trusted" 'grep -qx "!$INIT/ims_manager" "$R/trusted"'
 check "logs the version" 'grep -q "UPDATED: Package-Version: new" "$R/installer.log"'
 check "starts the daemon" 'grep -q "$INIT/ims_manager -a enable" "$R/on-args"'
+check "old version file removed" '[ ! -e "$INIT/version-old" ]'
+check "current version file kept" '[ -e "$INIT/version-new" ]'
 
 echo "--- boot, nothing to update"
 reset

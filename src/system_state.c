@@ -258,6 +258,53 @@ void ready_check(void)
     wait_for_lte();
 }
 
+#define CARRIER_MGR_SETTLE_SEC 5
+#define CARRIER_MGR_BUSY_MAX_SEC 180 /* its rebrand took 55 to 104 s in the omer bundles */
+
+/*
+ * When the SIM turns READY, carrier_mgr rebrands for it: it uninstalls the DCA and modem config,
+ * then installs the carrier's bars. In omer-B IMS registered at 14:30:45 and lost it at 14:31:41
+ * when that uninstall ran, and the two calls in between fell to 3G. The newer of its two slog
+ * markers says whether a rebrand is running.
+ * ponytail: overlapping rebrands can end on a "Finished" while another still runs; a missing
+ * marker is bounded by the cap. Swap in PPS config_status if it ever proves a better signal.
+ */
+static int carrier_mgr_busy(void)
+{
+    char last[512];
+    const char *cmd =
+        "PATH=/bin:/usr/bin:/sbin:/usr/sbin:$PATH; slog2info -b carrier_mgr 2>/dev/null | "
+        "grep -E 'Start checking if we need to uninstall/preseed bars|"
+        "Finished uninstall/preseed bars function' | tail -n 1";
+
+    return run_cmd_capture(cmd, last, sizeof(last)) > 0 && strstr(last, "Start checking") != NULL;
+}
+
+static void wait_carrier_mgr_idle(void)
+{
+    int waited = 0;
+
+    /* It starts about 1.5 s after the SIM turns READY, and this gets here about then. */
+    exit_if_stopped();
+    sleep(CARRIER_MGR_SETTLE_SEC);
+
+    while (carrier_mgr_busy())
+    {
+        if (waited == 0)
+            log_msg("[BBE] WAITING_FOR_CARRIER_MGR");
+        if (waited >= CARRIER_MGR_BUSY_MAX_SEC)
+        {
+            log_msg("[BBE] CARRIER_MGR_WAIT_TIMEOUT");
+            return;
+        }
+        exit_if_stopped();
+        sleep(3);
+        waited += 3;
+    }
+    if (waited)
+        log_msg("[BBE] CARRIER_MGR_DONE: waited %ds", waited);
+}
+
 /* Started at boot with nobody to retry: the SIM or data may just not be up yet. */
 void wait_until_ready(void)
 {
@@ -275,6 +322,7 @@ void wait_until_ready(void)
         sleep(3);
     }
 
+    wait_carrier_mgr_idle();
     fix_published_carrier_xml();
     wait_for_lte();
 }

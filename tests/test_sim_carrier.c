@@ -34,6 +34,15 @@ void fix_published_carrier_xml(void)
 {
 }
 
+static const char *g_slog_last = "";
+
+int run_cmd_capture(const char *cmd, char *out, size_t max_len)
+{
+    (void)cmd;
+    snprintf(out, max_len, "%s", g_slog_last);
+    return (int)strlen(out);
+}
+
 int read_file(const char *path, char *buf, size_t max_len)
 {
     (void)path;
@@ -118,6 +127,17 @@ int main(void)
     /* No ICCID on either side: nothing to compare. */
     g_status = sim;
     assert(!sim_carrier_changed());
+
+    /* carrier_mgr's newest marker, as in omer-B: running from 14:30:14 until 14:31:59. */
+    g_slog_last = "Nov 13 14:28:21.485  carrier_mgr.6910044  low_rate_log  0  Finished uninstall/preseed bars function\n";
+    assert(!carrier_mgr_busy());
+    g_slog_last = "Nov 13 14:30:14.913  carrier_mgr.6910044  low_rate_log  0  Start checking if we need to uninstall/preseed bars\n";
+    assert(carrier_mgr_busy());
+    g_slog_last = "Nov 13 14:31:59.843  carrier_mgr.6910044  low_rate_log  0  Finished uninstall/preseed bars function\n";
+    assert(!carrier_mgr_busy());
+    /* No carrier_mgr buffer, or slog2info missing: don't wait. */
+    g_slog_last = "";
+    assert(!carrier_mgr_busy());
 
     printf("test_sim_carrier: OK\n");
     return 0;

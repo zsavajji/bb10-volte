@@ -230,7 +230,10 @@ int main(int argc, char *argv[])
        back on). No berry monitor: it follows IMS. */
     if (volte_settings_voice_off())
     {
-        log_msg("[BBE] VOLTE_OFF: network refused every dial format; calls use 3G or 2G");
+        if (strcmp(volte_settings_selection(), "off") == 0)
+            log_msg("[BBE] VOLTE_OFF: turned off in the settings app; calls use 3G or 2G");
+        else
+            log_msg("[BBE] VOLTE_OFF: network refused every dial format; calls use 3G or 2G");
         write_dca_configs();
         if (push_dca_configs() != 0)
             log_msg("[BBE] DCA_FAILED: VoLTE off");

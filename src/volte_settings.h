@@ -22,4 +22,7 @@ const char *volte_settings_domain(void);
    dial format refused: IMS stays stopped, calls use 3G. */
 int volte_settings_voice_off(void);
 
+/* "auto", "manual" or "off" (turned off by the user). */
+const char *volte_settings_selection(void);
+
 #endif /* VOLTE_SETTINGS_H */

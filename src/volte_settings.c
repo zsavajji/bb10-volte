@@ -31,7 +31,7 @@ static char g_last_request[32];
 static char g_debug_state[16] = "idle";
 static char g_debug_file[64];
 static char g_message[160];
-static char g_selection[8] = "auto";     /* "auto" or "manual" */
+static char g_selection[8] = "auto";     /* "auto", "manual" or "off" (VoLTE turned off by the user) */
 static char g_failed[4];                 /* letters of modes refused while automatic */
 static char g_auto_state[12] = "testing"; /* "testing", "confirmed", "off" */
 static char g_auto_note[160];            /* last automatic event, memory only */
@@ -100,7 +100,7 @@ static int write_kv(const char *path, int id, const char *value)
 }
 
 /* --- automatic selection state, <carrier_id> <token> in dial-auto ---
-   Tokens: manual | ok (confirmed) |
+   Tokens: manual | forced (VoLTE turned off by the user) | ok (confirmed) |
    off (VoLTE off, once "done") | auto | auto-<failed letters> (testing). */
 
 static void save_auto(void)
@@ -109,7 +109,9 @@ static void save_auto(void)
 
     if (g_carrier_id <= 0)
         return;
-    if (strcmp(g_selection, "manual") == 0)
+    if (strcmp(g_selection, "off") == 0)
+        snprintf(tok, sizeof(tok), "forced");
+    else if (strcmp(g_selection, "manual") == 0)
         snprintf(tok, sizeof(tok), "manual");
     else if (strcmp(g_auto_state, "confirmed") == 0)
         snprintf(tok, sizeof(tok), "ok");
@@ -132,6 +134,8 @@ static void load_auto(const char *tok)
 
     if (strcmp(tok, "manual") == 0)
         snprintf(g_selection, sizeof(g_selection), "manual");
+    else if (strcmp(tok, "forced") == 0)
+        snprintf(g_selection, sizeof(g_selection), "off");
     else if (strcmp(tok, "ok") == 0)
         snprintf(g_auto_state, sizeof(g_auto_state), "confirmed");
     else if (strcmp(tok, "off") == 0 || strcmp(tok, "done") == 0)
@@ -453,6 +457,21 @@ static void auto_check_last_call(void)
     apply_mode(next, "Switched automatically");
 }
 
+/* The dial format (g_mode) stays, so turning VoLTE back on returns to it. */
+static void turn_off(void)
+{
+    if (call_active())
+    {
+        write_status("error", "A call is in progress; try again");
+        return;
+    }
+    snprintf(g_selection, sizeof(g_selection), "off");
+    save_auto();
+    log_msg("[BBE] VOLTE_OFF: turned off in the settings app; calls use 3G or 2G");
+    stop_ims();
+    write_status("idle", "VoLTE is off; calls use 3G or 2G");
+}
+
 void volte_settings_poll(void)
 {
     char text[1024];
@@ -487,6 +506,11 @@ void volte_settings_poll(void)
        config back in line with the stored mode. */
     if (mode[0])
     {
+        if (strcmp(mode, "off") == 0)
+        {
+            turn_off();
+            return;
+        }
         if (strcmp(mode, "auto") == 0)
         {
             int was_off = volte_settings_voice_off();
@@ -564,5 +588,11 @@ const char *volte_settings_domain(void)
 
 int volte_settings_voice_off(void)
 {
-    return strcmp(g_selection, "auto") == 0 && strcmp(g_auto_state, "off") == 0;
+    return strcmp(g_selection, "off") == 0 ||
+           (strcmp(g_selection, "auto") == 0 && strcmp(g_auto_state, "off") == 0);
+}
+
+const char *volte_settings_selection(void)
+{
+    return g_selection;
 }

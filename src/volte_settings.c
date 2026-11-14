@@ -8,6 +8,7 @@
 #include "sys_utils.h"
 #include "zip_writer.h"
 #include "ims_patch.h"
+#include "voice_flag.h"
 #include "log_utils.h"
 
 #include <stdio.h>
@@ -40,6 +41,52 @@ static unsigned long g_last_call_id;     /* last outgoing call already evaluated
 static volatile int g_phone_changed;
 static int g_carrier_id = -1;
 static int g_inited = 0;
+
+/* On/off knobs the settings app can flip. Each is a flag file in the data folder: present = on.
+   A per-carrier knob's file is <name>-<carrier id>. A file shipped in pkg/data comes back
+   on a reinstall. */
+typedef struct
+{
+    const char *name;
+    int per_carrier;
+} knob_t;
+
+static const knob_t g_knobs[] = {
+    {"force-ims-voice", 0}, /* keep the VoPS bit set while IMS is registered (voice_flag.c) */
+};
+#define KNOB_COUNT (sizeof(g_knobs) / sizeof(g_knobs[0]))
+
+static int knob_path(const knob_t *k, char *out, size_t n)
+{
+    int len;
+
+    if (k->per_carrier && g_carrier_id <= 0)
+        return -1;
+    if (k->per_carrier)
+        len = snprintf(out, n, "%s/%s-%d", g_data_path, k->name, g_carrier_id);
+    else
+        len = snprintf(out, n, "%s/%s", g_data_path, k->name);
+    return len < 0 || (size_t)len >= n ? -1 : 0;
+}
+
+static int knob_on(const knob_t *k)
+{
+    char path[512];
+
+    return knob_path(k, path, sizeof(path)) == 0 && access(path, F_OK) == 0;
+}
+
+static const knob_t *knob_find(const char *name)
+{
+    size_t i;
+
+    for (i = 0; i < KNOB_COUNT; i++)
+    {
+        if (strcmp(g_knobs[i].name, name) == 0)
+            return &g_knobs[i];
+    }
+    return NULL;
+}
 
 /* --- per-carrier data files (dial-modes / learned-domains) --- */
 
@@ -158,10 +205,30 @@ static void load_auto(const char *tok)
 static void write_status(const char *state, const char *message)
 {
     char buf[2048];
+    char knobs[128];
+    size_t i, used = 0;
 
     if (message)
         snprintf(g_message, sizeof(g_message), "%s", message);
 
+    /* name:0|1 for every knob that can be flipped now; a per-carrier one waits for the carrier. */
+    knobs[0] = '\0';
+    for (i = 0; i < KNOB_COUNT; i++)
+    {
+        char path[512];
+        int n;
+
+        if (knob_path(&g_knobs[i], path, sizeof(path)) != 0)
+            continue;
+        n = snprintf(knobs + used, sizeof(knobs) - used, "%s%s:%d", used ? "," : "",
+                     g_knobs[i].name, knob_on(&g_knobs[i]));
+        if (n < 0 || (size_t)n >= sizeof(knobs) - used)
+        {
+            knobs[used] = '\0';
+            break;
+        }
+        used += (size_t)n;
+    }
     snprintf(buf, sizeof(buf),
              "request=%s\n"
              "carrier=%d\n"
@@ -177,10 +244,11 @@ static void write_status(const char *state, const char *message)
              "selection=%s\n"
              "auto_state=%s\n"
              "auto_note=%s\n"
+             "knobs=%s\n"
              "updated=%ld\n",
              g_last_request, g_carrier_id, g_mode, state, g_imsi, g_learned,
              g_call.result, g_call.uri, g_debug_state, g_debug_file, g_message,
-             g_selection, g_auto_state, g_auto_note, (long)time(NULL));
+             g_selection, g_auto_state, g_auto_note, knobs, (long)time(NULL));
     write_file(STATUS_PATH, buf, 0666);
 }
 
@@ -356,10 +424,11 @@ void volte_settings_init(void)
     /* A request left from before this start was already handled (or is stale, like a debug
        run): only a newer one, written while the daemon runs, counts. */
     {
-        char text[1024], m[16], req[32] = {0};
+        char text[1024], m[16], req[32] = {0}, k[32];
         int r, d;
         if (read_file(REQUEST_PATH, text, sizeof(text)) >= 0 &&
-            volte_settings_parse_request(text, m, sizeof(m), req, sizeof(req), &r, &d))
+            volte_settings_parse_request(text, m, sizeof(m), req, sizeof(req), &r, &d, k,
+                                         sizeof(k)))
             snprintf(g_last_request, sizeof(g_last_request), "%s", req);
     }
 
@@ -488,6 +557,54 @@ static void auto_check_last_call(void)
     apply_mode(next, "Switched automatically");
 }
 
+/* "<name>:<0|1>" from the app: flip the flag file, then make it take effect. */
+static void apply_knob(char *spec)
+{
+    char path[512];
+    char *colon = strchr(spec, ':');
+    const knob_t *k;
+    int on;
+
+    if (!colon)
+    {
+        write_status("error", "Unknown setting");
+        return;
+    }
+    *colon = '\0';
+    k = knob_find(spec);
+    if (!k || (strcmp(colon + 1, "1") != 0 && strcmp(colon + 1, "0") != 0))
+    {
+        write_status("error", "Unknown setting");
+        return;
+    }
+    on = colon[1] == '1';
+
+    if (knob_path(k, path, sizeof(path)) != 0)
+    {
+        write_status("error", "Carrier not known yet");
+        return;
+    }
+    if (knob_on(k) == on)
+    {
+        write_status("idle", "No change");
+        return;
+    }
+    if ((on ? write_file(path, "on\n", 0644) : unlink(path)) != 0)
+    {
+        write_status("error", "Could not save the setting");
+        return;
+    }
+    log_msg("[BBE] KNOB: %s %s", k->name, on ? "on" : "off");
+
+    if (strcmp(k->name, "force-ims-voice") == 0)
+    {
+        /* sync_voice_flag() runs every monitor loop and reads this. */
+        g_force_ims_voice = on;
+        write_status("idle", on ? "Saved" : "Saved; the phone drops the flag at its next network update");
+        return;
+    }
+}
+
 /* The dial format (g_mode) stays, so turning VoLTE back on returns to it. */
 static void turn_off(void)
 {
@@ -513,12 +630,13 @@ void volte_settings_poll_busy(void)
     char text[1024];
     char mode[16] = {0};
     char request[32] = {0};
+    char knob[32] = {0};
     int refresh = 0, debug = 0;
 
     if (!g_inited || read_file(REQUEST_PATH, text, sizeof(text)) < 0)
         return;
     if (!volte_settings_parse_request(text, mode, sizeof(mode), request, sizeof(request),
-                                      &refresh, &debug))
+                                      &refresh, &debug, knob, sizeof(knob)))
         return;
     if (request[0] && strcmp(request, g_last_request) == 0)
         return;
@@ -528,7 +646,7 @@ void volte_settings_poll_busy(void)
         turn_off();
     else if (debug)
         run_debug();
-    else if (mode[0])
+    else if (mode[0] || knob[0])
         write_status("error", "VoLTE is still connecting; try again in a few minutes. VoLTE off works now.");
     else
         write_status("idle", "VoLTE is still connecting. VoLTE off works now.");
@@ -539,6 +657,7 @@ void volte_settings_poll(void)
     char text[1024];
     char mode[16] = {0};
     char request[32] = {0};
+    char knob[32] = {0};
     int refresh = 0, debug = 0;
 
     if (!g_inited)
@@ -555,7 +674,7 @@ void volte_settings_poll(void)
     if (read_file(REQUEST_PATH, text, sizeof(text)) < 0)
         return;
     if (!volte_settings_parse_request(text, mode, sizeof(mode), request, sizeof(request),
-                                      &refresh, &debug))
+                                      &refresh, &debug, knob, sizeof(knob)))
         return;
     if (request[0] && strcmp(request, g_last_request) == 0)
         return;
@@ -623,6 +742,12 @@ void volte_settings_poll(void)
         snprintf(g_auto_state, sizeof(g_auto_state), "testing");
         save_auto();
         apply_mode(mode, "Applied");
+        return;
+    }
+
+    if (knob[0])
+    {
+        apply_knob(knob);
         return;
     }
 

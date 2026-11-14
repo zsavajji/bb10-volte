@@ -2,6 +2,7 @@
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 BIN=$SCRIPT_DIR/ims_manager
 LOG=/var/log/installer.log
+REFRESH=
 
 # Only there so the installer prints the version (see the Makefile); older installs leave theirs.
 VER=$(sed -n 's/^Package-Version: *//p' "$SCRIPT_DIR/../MANIFEST")
@@ -43,6 +44,9 @@ if [ -f "$BIN.new" ]; then
         exit 1
     fi
     if mv -f "$BIN.new" "$BIN"; then
+        # A new build may write different settings or patch bytes. -r applies them even when IMS
+        # is already registered, so an update needs no reboot.
+        REFRESH=-r
         echo "$(date '+%Y-%m-%d %H:%M:%S') [BBE] UPDATED: $(grep '^Package-Version' "$SCRIPT_DIR/../MANIFEST")" >> "$LOG"
     else
         echo "$(date '+%Y-%m-%d %H:%M:%S') [BBE] UPDATE_FAILED: could not move the new binary" >> "$LOG"
@@ -52,4 +56,4 @@ fi
 # Trust is on the inode and a moved file doesn't keep it, so trust it on every start, boot included.
 # The daemon does the same for its ims_rrm copy.
 /proc/boot/pathtrust "!$BIN"
-on -d "$BIN" -a enable
+on -d "$BIN" -a enable $REFRESH

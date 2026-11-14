@@ -53,7 +53,7 @@ check "new binary in place" 'grep -q new "$INIT/ims_manager"'
 check ".new removed" '[ ! -e "$INIT/ims_manager.new" ]'
 check "trusted" 'grep -qx "!$INIT/ims_manager" "$R/trusted"'
 check "logs the version" 'grep -q "UPDATED: Package-Version: new" "$R/installer.log"'
-check "starts the daemon" 'grep -q "$INIT/ims_manager -a enable" "$R/on-args"'
+check "starts the daemon" 'grep -q "$INIT/ims_manager -a enable -r$" "$R/on-args"'
 check "old version file removed" '[ ! -e "$INIT/version-old" ]'
 check "current version file kept" '[ -e "$INIT/version-new" ]'
 
@@ -64,7 +64,7 @@ rm "$INIT/ims_manager.new"
 check "exits 0" '[ "$rc" = 0 ]'
 check "binary untouched" 'grep -q old "$INIT/ims_manager"'
 check "trusted" 'grep -qx "!$INIT/ims_manager" "$R/trusted"'
-check "starts the daemon" '[ -e "$R/on-args" ]'
+check "starts the daemon, without -r" 'grep -q "$INIT/ims_manager -a enable$" "$R/on-args"'
 
 rm -rf "$R"
 [ "$FAILS" = 0 ] && echo "all passed" || { echo "$FAILS failed"; exit 1; }

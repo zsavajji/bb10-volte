@@ -125,14 +125,16 @@ Execute the AutoRoot installer with the path to the ZIP archive:
 
 Replace `/path/to/volte.zip` with the actual path to the transferred archive.
 
-Upgrading works the same way, with the daemon still running. The installer can't replace a running binary, so the package also carries it as `ims_manager.new`; `start.sh` stops the old daemon, moves the new one into place and logs `[BBE] UPDATED` in `/var/log/installer.log`. If it logs `[BBE] UPDATE_FAILED` instead, reboot and install again.
+**Connect to Wi-Fi or switch Mobile Data on before the first install.** The first start downloads the carrier list. An update keeps that list and your settings. It downloads the list again only when the new version builds it differently, and it keeps the old list if that download fails.
+
+Upgrading works the same way, with the daemon still running. The installer can't replace a running binary, so the package also carries it as `ims_manager.new`; `start.sh` stops the old daemon, moves the new one into place and logs `[BBE] UPDATED` in `/var/log/installer.log`. If it logs `[BBE] UPDATE_FAILED` instead, reboot and install again. The new daemon applies the new settings and restarts `ims_rrm` by itself, so an update needs no reboot. VoLTE is unavailable briefly while it registers again.
 
 ### 5. Verify functionality
 
 After installation:
 
 1. Follow any instructions displayed by the installer.
-2. Reboot the device if required by the installation process.
+2. Reboot after a first install if the installer asks for it. An update needs no reboot.
 3. Verify that LTE connectivity is available.
 4. Check whether VoLTE is registered or enabled, where the device exposes this information.
 5. Test incoming and outgoing calls while the device is connected to LTE.
